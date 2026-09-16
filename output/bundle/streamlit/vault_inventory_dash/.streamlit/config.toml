@@ -1,0 +1,35 @@
+# Theme tokens mirror the :root variables in vault_inventory_dashboard.html, so
+# native Streamlit widgets sit inside the ported .fct chrome without clashing.
+# SiS honors only a subset of this file (theme); [server] is ignored there.
+[theme]
+base = "light"
+primaryColor = "#4d7ab8"
+backgroundColor = "#f0f2f5"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1a2b4a"
+borderColor = "#e2e8f0"
+linkColor = "#4d7ab8"
+baseFontSize = 14
+baseRadius = "8px"
+
+# The template's three faces. Bebas Neue drives the logo + section labels and
+# DM Mono every micro-label; both are also @imported in style.py so they reach
+# the shadow-DOM table component, which this file cannot style.
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Bebas Neue:https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap"
+codeFont = "DM Mono:https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap"
+
+# Semantic measures from the template
+blueColor = "#4d7ab8"
+greenColor = "#16a34a"
+redColor = "#dc2626"
+orangeColor = "#b5822a"
+violetColor = "#5b3a8e"
+grayColor = "#6b7fa3"
+
+# Aging ramp (sequential, oldest = most saturated) — the shared encoding used by
+# the donut arcs and the table's Aging Bucket chips.
+chartCategoricalColors = ["#93b4dc", "#4d7ab8", "#2f5d96", "#b5822a", "#a8332b", "#16a34a", "#5b3a8e", "#0891b2", "#be185d", "#4b5563"]
+
+[server]
+runOnSave = true

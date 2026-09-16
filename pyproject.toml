@@ -1,0 +1,29 @@
+[project]
+name = "vault-inventory-dash"
+version = "0.1.0"
+description = "Vault Inventory / Dealernet dashboard — Streamlit recreation of vault_inventory_dashboard.html over the Oracle vault inventory view joined to Dealernet case prices."
+requires-python = ">=3.11"
+dependencies = [
+    # >=1.57 for st.components.v2 (interactive.py) — above the SiS warehouse
+    # runtime's ~1.52 ceiling, which is why this app targets the container runtime.
+    "streamlit>=1.57",
+    "snowflake-snowpark-python",
+    # Explicit: streamlit[snowflake] gates the connector on python_version < "3.12",
+    # so on 3.12+ it is silently skipped and `import snowflake` fails.
+    "snowflake-connector-python",
+    "pandas>=2.0",
+    "openpyxl>=3.1",
+    # zoneinfo is stdlib but reads an OS tz database a slim container image may not
+    # ship; this guarantees America/New_York resolves so the DATA PULLED tooltip
+    # shows local time (style.py falls back to UTC-only without it).
+    "tzdata",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# Flat-layout app (not a library): declare the modules explicitly so an editable
+# install (pip install -e .) doesn't fail auto-discovery.
+[tool.setuptools]
+py-modules = ["streamlit_app", "queries", "data", "transforms", "style", "interactive"]

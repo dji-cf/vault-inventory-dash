@@ -1,0 +1,60 @@
+# Snowflake CLI project definition — deploys the dashboard to
+# Streamlit-in-Snowflake on the SPCS CONTAINER runtime (Streamlit >= 1.57).
+#
+# The container runtime installs deps from PyPI via uv, reading pyproject.toml.
+# That is what unlocks a Streamlit newer than the ~1.52 ceiling of the warehouse
+# runtime — a hard requirement here, not a preference: interactive.py builds the
+# product table with st.components.v2, which the warehouse runtime cannot serve.
+#
+#   snow --version >= 3.14         # container runtime needs definition_version 2
+#   cd vault-inventory-dash        # the folder with streamlit_app.py
+#   snow streamlit deploy vault_inventory_dash --replace --role POWER_ANALYST_ORACLE_PROD
+#
+# The command uploads the `artifacts` below to `stage`, (re)creates the STREAMLIT
+# object, and prints its URL. Verify with `SHOW STREAMLITS LIKE ... IN ACCOUNT`:
+# a clean exit from the deploy command is NOT proof the object exists.
+#
+# PREREQUISITE (one-time, needs ACCOUNTADMIN): the PyPI external access
+# integration below must exist and be granted to the deploying role, or the
+# container build cannot fetch packages. Confirmed present on this account
+# (SHOW EXTERNAL ACCESS INTEGRATIONS -> PYPI_ACCESS_INTEGRATION, enabled).
+definition_version: 2
+entities:
+  vault_inventory_dash:
+    type: streamlit
+    # Fully qualified because the FANATICS_COLLECTIBLES_PROD connection sets no
+    # default database/schema. ORACLE_DATA_PROD.SANDBOX is where the
+    # POWER_ANALYST_ORACLE_PROD role already owns Streamlit apps and can read
+    # both VAULT_INV and the EDP_SILVER Dealernet tables. The connection's
+    # default role (SVC_CLAUDE_MCP_ROLE) lacks those grants — pass --role.
+    identifier:
+      name: VAULT_INVENTORY_DASH
+      database: ORACLE_DATA_PROD
+      schema: SANDBOX
+    title: "Vault Inventory / Dealernet"
+    stage: streamlit_stage              # created automatically if absent
+    # Container runtime: the app process runs on this compute pool node.
+    # QUERY_WAREHOUSE below is used only for the SQL the app issues.
+    runtime_name: SYSTEM$ST_CONTAINER_RUNTIME_PY3_11
+    # Account default, read from
+    #   SHOW PARAMETERS LIKE 'DEFAULT_STREAMLIT_COMPUTE_POOL' IN ACCOUNT
+    compute_pool: SYSTEM_COMPUTE_POOL_CPU
+    external_access_integrations:
+      # REQUIRED because pyproject.toml is in artifacts: its mere presence makes
+      # uv resolve against PyPI, which needs network access.
+      - PYPI_ACCESS_INTEGRATION
+    # Executes the app's SQL. Keep in sync with data.py::_WAREHOUSE.
+    query_warehouse: ANALYTICS_WAREHOUSE
+    main_file: streamlit_app.py
+    # Every file the app opens at runtime must be listed. A missing entry uploads
+    # as a zero-byte stage object and the app dies on first import.
+    artifacts:
+      - streamlit_app.py
+      - queries.py
+      - data.py
+      - transforms.py
+      - style.py
+      - interactive.py
+      - pyproject.toml                  # container runtime reads this for deps
+      # SiS honors only a subset of config.toml (theme) and ignores [server].
+      - .streamlit/config.toml

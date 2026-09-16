@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vault Inventory Dashboard</title>
+
+<!-- DM Mono IS loaded here. The Relic template references 'DM Mono' 37 times but
+     never fetches it, so every micro-label silently falls back to generic monospace.
+     Do not drop it from this link. -->
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   VAULT INVENTORY DASHBOARD — UI template
+   Design system lifted from Relic_Inventory_Dashboard_2026-07-01.html
+   (canonical document, lines 251–1106). Class names kept identical so the
+   Streamlit-in-Snowflake port can adapt relic_inventory_dash/style.py rather
+   than rewrite it. Two renames only: .brand-table-wrap -> .table-wrap (what
+   style.py already calls it) and .brand-bar-* -> .mix-bar-*.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg: #f0f2f5;
+  --surface: #ffffff;
+  --surface2: #f8f9fc;
+  --border: #e2e8f0;
+  --accent: #4d7ab8;
+  --accent2: #16a34a;
+  --text: #1a2b4a;
+  --muted: #6b7fa3;
+  --selected-bg: #eff6ff;
+  --selected-border: #4d7ab8;
+
+  /* Chrome colors the source hard-codes everywhere. Promoted to tokens. */
+  --navy: #1a2b4a;
+  --navy-deep: #0f1e38;
+  --gold: #b5822a;
+  --gold-wash: #fffbf0;
+  --on-navy: #7a99c0;
+  --on-navy-bright: #e0eaf7;
+
+  /* Semantic measures */
+  --pos: #16a34a;
+  --neg: #dc2626;
+
+  /* AGING BUCKET RAMP — sequential, oldest = most saturated. Shared encoding:
+     the donut arcs and the table's Aging Bucket chips use the same 5 values. */
+  --age-0-3:    #93b4dc;
+  --age-3-6:    #4d7ab8;
+  --age-6-12:   #2f5d96;
+  --age-12-24:  #b5822a;
+  --age-24plus: #a8332b;
+
+  /* Column-group band tints. First three are the source values verbatim. */
+  --band-identity:  #1f3d6a;
+  --band-inventory: #166534;
+  --band-pack:      #57534e;
+  --band-pricing:   #155e63;
+  --band-margin:    #8a6314;
+  --band-dealernet: #5b3a8e;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+  font-size: 14px;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── HEADER ───────────────────────────────────────────────────────────────── */
+header {
+  background: var(--navy);
+  padding: 0 28px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0,0,0,.25);
+}
+.header-row { display: flex; align-items: center; gap: 20px; width: 100%; flex-wrap: wrap; }
+.header-row-top { padding: 10px 0; }
+.header-row-bottom { border-top: 1px solid rgba(255,255,255,.1); padding: 6px 0; gap: 12px; }
+.hdr-vdiv {
+  width: 2px; height: 24px; background: rgba(255,255,255,.5);
+  margin: 0 12px; align-self: center; border-radius: 2px;
+}
+.header-row-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px; letter-spacing: 1px;
+  color: var(--on-navy); white-space: nowrap;
+}
+.logo {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 28px; letter-spacing: 2px;
+  color: #ffffff; line-height: 1;
+}
+.logo span { color: var(--on-navy); font-size: 18px; letter-spacing: 1px; }
+
+.dataset-selector-wrap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dataset-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  color: var(--on-navy); letter-spacing: .5px; white-space: nowrap;
+}
+.dataset-value {
+  color: #fff; font-size: 13px; font-weight: 700;
+  font-family: 'DM Mono', monospace;
+}
+.dataset-value.dim { color: rgba(255,255,255,.85); font-size: 12px; font-weight: 400; }
+.dataset-sep { color: rgba(255,255,255,.4); margin: 0 6px; }
+
+/* Right-pushed header facts (AS OF / GENERATED live on the left group). */
+.hdr-meta { margin-left: auto; display: flex; gap: 26px; row-gap: 8px; flex-wrap: wrap; }
+.hdr-meta > div { font-size: 10px; font-weight: 700; letter-spacing: .5px; color: var(--on-navy); text-transform: uppercase; }
+.hdr-meta b {
+  display: block; margin-top: 2px; color: #fff; font-size: 14px;
+  font-variant-numeric: tabular-nums; letter-spacing: 0;
+}
+
+/* ── MAIN ─────────────────────────────────────────────────────────────────── */
+main { padding: 28px; max-width: 1600px; margin: 0 auto; }
+
+/* ── SECTION LABELS ───────────────────────────────────────────────────────────
+   The source declares .section-label but never renders it, using .trend-title
+   instead. Revived here — it is the same ::after hairline device. */
+.section-label {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 15px; letter-spacing: 3px;
+  color: var(--muted);
+  margin: 4px 0 12px;
+  display: flex; align-items: center; gap: 10px;
+}
+.section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* ── LEGEND ───────────────────────────────────────────────────────────────── */
+.legend { display: flex; gap: 20px; margin-bottom: 20px; flex-wrap: wrap; }
+.legend-item {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace;
+}
+.legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+/* ── FILTER BAR ───────────────────────────────────────────────────────────── */
+.filter-bar {
+  display: flex; gap: 10px; margin-bottom: 20px;
+  flex-wrap: wrap; align-items: center;
+}
+.search-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 13px;
+  width: 240px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.search-box:focus { border-color: var(--accent); }
+.search-box::placeholder { color: var(--muted); }
+.sort-label { font-size: 12px; color: var(--muted); }
+.sort-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 0.5px;
+}
+.sort-btn:hover, .sort-btn.active { border-color: var(--accent); color: var(--accent); }
+.filter-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s;
+  min-width: 132px;
+}
+.filter-select:focus { border-color: var(--accent); }
+.filter-badge {
+  font-family: 'DM Mono', monospace; font-size: 10px;
+  color: var(--accent); letter-spacing: 1px;
+  padding: 4px 8px; border: 1px solid var(--accent); border-radius: 4px;
+}
+
+/* ── STATUS TOGGLE (segmented) ────────────────────────────────────────────── */
+.status-toggle {
+  display: flex; gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.status-toggle button {
+  background: var(--surface);
+  border: none;
+  border-right: 1px solid var(--border);
+  color: var(--muted);
+  padding: 7px 14px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.status-toggle button:last-child { border-right: none; }
+.status-toggle button:hover { background: var(--surface2); color: var(--text); }
+.status-toggle button.active-all { background: var(--surface2); color: var(--text); font-weight: 600; }
+.status-toggle button.active-S   { background: #e8f5ec; color: #2a6e3f; font-weight: 600; }
+.status-toggle button.active-O   { background: #fdecea; color: #9c2a22; font-weight: 600; }
+
+.status-pill {
+  font-family: 'Inter', sans-serif;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 8px; border-radius: 10px;
+  background: var(--accent); color: #fff;
+  letter-spacing: .5px; white-space: nowrap;
+}
+.pill-live { background: #e8f5ec; color: #2a6e3f; }
+.pill-none { background: #fdecea; color: #9c2a22; }
+
+/* ── CONTEXT BAR ──────────────────────────────────────────────────────────── */
+.context-bar { display: flex; align-items: center; gap: 10px; padding: 8px 0; margin-bottom: 12px; flex-wrap: wrap; }
+.context-status, .context-view {
+  font-family: 'DM Mono', monospace;
+  font-size: 12px; font-weight: 600; letter-spacing: 1px;
+  padding: 3px 10px; border-radius: 5px; color: #fff;
+}
+.context-status { background: var(--gold); }
+.context-status.status-S { background: var(--accent2); }
+.context-status.status-O { background: var(--neg); }
+.context-sep { color: var(--muted); font-size: 14px; }
+.context-view { background: #5a7fbf; }
+.context-view.view-filtered { background: #7b52ab; }
+
+/* ── STAT CARDS ───────────────────────────────────────────────────────────── */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+.stat-card {
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  border-top: 3px solid var(--accent);
+}
+.stat-card-total { border-top-color: var(--gold); background: var(--gold-wash); }
+.stat-card-market { border-top-color: var(--accent2); }
+.stat-card-margin { border-top-color: var(--band-dealernet); }
+.stat-card-label {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .7px; color: var(--muted); margin-bottom: 6px;
+}
+.stat-card-value {
+  font-size: 26px; font-weight: 700; color: var(--text);
+  line-height: 1.1; letter-spacing: -.5px;
+  font-variant-numeric: tabular-nums;
+}
+.stat-card-sub {
+  font-size: 11px; color: var(--muted); margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── CHARTS ───────────────────────────────────────────────────────────────── */
+.chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+@media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+
+.chart-wrap {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 22px 12px;
+  overflow-x: auto;
+}
+.chart-wrap svg { display: block; }
+.chart-title {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px; letter-spacing: 1px; color: var(--muted);
+  text-transform: uppercase; margin-bottom: 14px;
+}
+.chart-title b { color: var(--text); font-weight: 500; }
+
+/* Donut: SVG on the left, itemized legend on the right. */
+.donut-row { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+.donut-center-val {
+  font-family: 'Inter', sans-serif; font-size: 20px; font-weight: 700;
+  fill: var(--text); font-variant-numeric: tabular-nums;
+}
+.donut-center-lbl {
+  font-family: 'DM Mono', monospace; font-size: 9px;
+  fill: #6b7fa3; letter-spacing: 1px;
+}
+.donut-legend { flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 6px; }
+.donut-legend-row {
+  display: grid; grid-template-columns: 10px 1fr auto auto;
+  align-items: center; gap: 8px;
+  font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted);
+}
+.donut-legend-row .dl-dot { width: 10px; height: 10px; border-radius: 2px; }
+.donut-legend-row .dl-val { color: var(--text); font-variant-numeric: tabular-nums; }
+.donut-legend-row .dl-pct { width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Horizontal bars: label / track / value. */
+.hbars { display: flex; flex-direction: column; gap: 7px; }
+.hbar-row {
+  display: grid; grid-template-columns: 112px 1fr 76px;
+  align-items: center; gap: 10px;
+  font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted);
+}
+.hbar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hbar-track { background: var(--surface2); border-radius: 3px; height: 14px; overflow: hidden; }
+.hbar-fill { height: 100%; border-radius: 3px; transition: width .25s ease; }
+.hbar-val { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+
+/* ── TABLE ────────────────────────────────────────────────────────────────── */
+.table-action-bar { display: flex; justify-content: flex-end; align-items: center; gap: 10px; padding: 6px 0; }
+.table-action-bar .export-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.table-action-bar .export-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.table-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  overflow-x: auto;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+table { width: 100%; min-width: max-content; border-collapse: collapse; table-layout: auto; }
+
+thead th {
+  background: var(--navy);
+  padding: 8px 12px;
+  text-align: right;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  color: #ffffff;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  cursor: pointer;
+}
+thead th:first-child { text-align: left; background: #000000 !important; color: #fff !important; }
+thead th.sorted { color: var(--gold); }
+thead th .sort-arrow { margin-left: 4px; opacity: 0.6; }
+
+.col-group-header th {
+  background: var(--navy-deep);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  text-align: center;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  cursor: default;
+}
+.col-group-header th:first-child { background: #000000 !important; }
+
+/* Band tints repeat on both header rows so each group reads as one vertical
+   stripe — the .th-whole/.th-nonwhole/.th-cutsig device, retinted per band. */
+.th-identity  { background: var(--band-identity)  !important; color: #fff !important; border-bottom: none !important; }
+.th-inventory { background: var(--band-inventory) !important; color: #fff !important; border-bottom: none !important; }
+.th-pack      { background: var(--band-pack)      !important; color: #fff !important; border-bottom: none !important; }
+.th-pricing   { background: var(--band-pricing)   !important; color: #fff !important; border-bottom: none !important; }
+.th-margin    { background: var(--band-margin)    !important; color: #fff !important; border-bottom: none !important; }
+.th-dealernet { background: var(--band-dealernet) !important; color: #fff !important; border-bottom: none !important; }
+
+/* Inventory Value is the authoritative measure — it gets the gold treatment the
+   source reserves for its TOTAL VALUE column. */
+thead th.td-total { background: var(--gold) !important; color: #fff !important; }
+.td-total { font-weight: 700; color: #000000; font-size: 13px; }
+
+td {
+  padding: 9px 12px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+td:first-child {
+  text-align: left;
+  font-size: 13px;
+  font-weight: 500;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+td.td-left { text-align: left; }
+td.td-muted { color: var(--muted); }
+td.td-pos { color: var(--pos); }
+td.td-neg { color: var(--neg); }
+td.td-null { color: #b8c2d4; }
+td.td-code { font-family: 'DM Mono', monospace; font-size: 11px; }
+
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface2); }
+tbody tr.selected { background: var(--selected-bg); border-left: 3px solid var(--selected-border); }
+tbody tr.selected td:first-child { padding-left: 13px; }
+
+.tfoot-row { background: var(--surface2); border-top: 2px solid var(--border); }
+.tfoot-row td { font-weight: 700; font-size: 12px; }
+
+/* Bar-in-cell under the product name: cost / margin split per case.
+   (.brand-bar-* in the source.) */
+.mix-bar-wrap {
+  display: flex; gap: 2px; height: 4px;
+  border-radius: 3px; overflow: hidden;
+  width: 100px; margin-top: 4px;
+}
+.mix-bar-seg { height: 100%; }
+.sub-label { color: var(--muted); font-size: 10px; font-weight: 400; }
+
+/* CHIPS */
+.chip {
+  font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 700;
+  padding: 1px 5px; border-radius: 4px; vertical-align: middle;
+  white-space: nowrap;
+}
+.chip-up   { background: #dcfce7; color: #166534; }
+.chip-down { background: #fee2e2; color: #7f1d1d; }
+.chip-new  { background: #e0e7ff; color: #3730a3; }
+.chip-age  { color: #fff; }
+
+/* STICKY: the 22-column table scrolls sideways, so the product name column is
+   pinned — it is what keeps rows identifiable. thead/tfoot stick as blocks,
+   which handles the two-row grouped header without per-row top offsets.
+   (This is the behavior relic_inventory_dash/style.py:207-220 already ships;
+   the source HTML has none and leans on pagination alone.) */
+.table-wrap.scrollable { max-height: 560px; overflow: auto; }
+.table-wrap.scrollable thead { position: sticky; top: 0; z-index: 3; }
+.table-wrap.scrollable tfoot { position: sticky; bottom: 0; z-index: 3; }
+thead th:first-child { position: sticky; left: 0; z-index: 4; }
+tbody td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+tbody tr:hover td:first-child { background: var(--surface2); }
+tbody tr.selected td:first-child { background: var(--selected-bg); }
+tfoot td:first-child { position: sticky; left: 0; z-index: 4; background: var(--surface2); }
+
+/* ── PAGINATION ───────────────────────────────────────────────────────────── */
+.pagination {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--muted);
+  background: var(--surface2);
+  border-radius: 0 0 8px 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  flex-wrap: wrap;
+}
+.pagination .pg-count { margin-right: auto; font-family: 'DM Mono', monospace; font-size: 11px; }
+.page-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 5px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+.page-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ── EMPTY STATE ──────────────────────────────────────────────────────────── */
+.no-data {
+  text-align: center; padding: 40px;
+  color: var(--muted); font-family: 'DM Mono', monospace; font-size: 13px;
+  white-space: normal;
+}
+td.no-data:first-child { position: static; max-width: none; }
+
+/* ── DETAIL PANEL (row drill-down) ────────────────────────────────────────── */
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.detail-panel {
+  background: var(--surface);
+  border: 1px solid var(--accent2);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 18px;
+  animation: slideIn 0.25s ease;
+}
+.detail-panel-header {
+  background: var(--navy);
+  padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.detail-panel-title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 18px; color: #fff; letter-spacing: 1.5px;
+}
+.detail-count-badge {
+  background: rgba(255,255,255,.12);
+  border: 1px solid rgba(255,255,255,.2);
+  color: #c5d4ea;
+  font-family: 'DM Mono', monospace;
+  font-size: 11px; padding: 2px 8px; border-radius: 20px;
+}
+.close-btn {
+  margin-left: auto;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.2);
+  color: var(--on-navy-bright);
+  cursor: pointer;
+  padding: 5px 12px; border-radius: 5px;
+  font-size: 11px; font-weight: 700;
+  transition: all 0.15s;
+}
+.close-btn:hover { background: rgba(220,38,38,.3); border-color: var(--neg); color: #fff; }
+.detail-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1px; background: var(--border);
+}
+.detail-cell { background: var(--surface); padding: 12px 16px; }
+.detail-cell .dc-lbl {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--muted); margin-bottom: 4px;
+}
+.detail-cell .dc-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 600px) {
+  main { padding: 16px; }
+  header { padding: 0 16px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-row header-row-top">
+    <div class="logo">Vault Inventory <span>/ Dealernet</span></div>
+    <div class="dataset-selector-wrap">
+      <label class="dataset-label">AS OF</label>
+      <span class="dataset-value" id="hdr-asof"></span>
+      <span class="dataset-sep">&middot;</span>
+      <label class="dataset-label">GENERATED</label>
+      <span class="dataset-value dim" id="hdr-generated"></span>
+    </div>
+    <div class="hdr-meta">
+      <div>SKUs<b id="hdr-skus"></b></div>
+      <div>Brands<b id="hdr-brands"></b></div>
+      <div>Total Value<b id="hdr-total"></b></div>
+    </div>
+  </div>
+  <div class="header-row header-row-bottom">
+    <span class="header-row-label">MAPPING</span>
+    <div class="status-toggle" id="mapping-toggle">
+      <button class="active-all" data-status="A" onclick="setStatusFilter('A')">ALL</button>
+      <button data-status="S" onclick="setStatusFilter('S')">MAPPED</button>
+      <button data-status="O" onclick="setStatusFilter('O')">NO PRICE</button>
+    </div>
+    <div class="hdr-vdiv"></div>
+    <span class="header-row-label" id="hdr-mapping-note"></span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ══ KPI ROW — the 6 Sigma KPI elements, in Sigma's order ══ -->
+  <div class="stat-cards" id="stat-cards"></div>
+
+  <!-- ══ CONTEXT ECHO ══ -->
+  <div class="context-bar">
+    <span class="context-status" id="context-status">ALL MAPPING</span>
+    <span class="context-sep">&middot;</span>
+    <span class="context-view" id="context-view">ALL PRODUCTS</span>
+  </div>
+
+  <!-- ══ FILTERS — one native control per filter, so each becomes a single
+          st.multiselect / st.text_input in the Streamlit port ══ -->
+  <div class="filter-bar">
+    <span class="sort-label">FILTER:</span>
+    <input class="search-box" id="f-search" placeholder="Product or item number…" oninput="applyFilters()">
+    <select class="filter-select" id="f-brandbucket" onchange="applyFilters()"></select>
+    <select class="filter-select" id="f-aging"       onchange="applyFilters()"></select>
+    <select class="filter-select" id="f-year"        onchange="applyFilters()"></select>
+    <select class="filter-select" id="f-boxtype"     onchange="applyFilters()"></select>
+    <select class="filter-select" id="f-pricesource" onchange="applyFilters()"></select>
+    <span class="filter-badge" id="f-badge" style="display:none">FILTERED</span>
+    <button class="sort-btn" id="f-clear" style="display:none" onclick="clearGlobalFilters()">&#10005; CLEAR FILTERS</button>
+  </div>
+
+  <!-- ══ SHARED AGING ENCODING — the ramp used by both donuts and the table chips ══ -->
+  <div class="legend" id="aging-legend"></div>
+
+  <!-- ══ AGING COMPOSITION — Sigma elements 4Lyzu8Qv_y / pdEjMAfSb_ ══ -->
+  <div class="section-label">AGING COMPOSITION</div>
+  <div class="chart-grid">
+    <div class="chart-wrap">
+      <div class="chart-title">Aging composition by <b># of Cases</b></div>
+      <div class="donut-row" id="chart-aging-cases"></div>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">Aging composition by <b>Inventory Value</b></div>
+      <div class="donut-row" id="chart-aging-value"></div>
+    </div>
+  </div>
+
+  <!-- ══ INVENTORY BY BRAND — Sigma elements DGZfr6gxTx / 60K3IgKTBo.
+          Sorted bars, not donuts: Brand Bucket has 10 categories. ══ -->
+  <div class="section-label">INVENTORY BY BRAND</div>
+  <div class="chart-grid">
+    <div class="chart-wrap">
+      <div class="chart-title">Inventory by brand &mdash; <b># of Cases</b></div>
+      <div class="hbars" id="chart-brand-cases"></div>
+    </div>
+    <div class="chart-wrap">
+      <div class="chart-title">Inventory by brand &mdash; <b>Inventory Value</b></div>
+      <div class="hbars" id="chart-brand-value"></div>
+    </div>
+  </div>
+
+  <!-- ══ PRODUCT DETAIL — Sigma element z10oydAU5w, all 22 display columns ══ -->
+  <div class="section-label">PRODUCT DETAIL</div>
+  <div class="table-action-bar">
+    <span class="sort-label" id="table-note"></span>
+    <button class="export-btn" onclick="exportTable()">&#11015; EXPORT XLS</button>
+  </div>
+  <div class="table-wrap scrollable">
+    <table id="product-table">
+      <thead>
+        <tr class="col-group-header" id="group-row"></tr>
+        <tr id="header-row"></tr>
+      </thead>
+      <tbody id="product-tbody"></tbody>
+      <tfoot id="product-tfoot"></tfoot>
+    </table>
+  </div>
+  <div class="pagination" id="pagination"></div>
+
+  <div id="detail-panel"></div>
+
+</main>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════════
+   MOCK DATA — the single data source for this template.
+   Real category labels and dataset scale come from the Sigma workbook
+   (8d898107-2c74-41a7-94b7-15909b773301, element NVWxD6IuSz):
+     238 SKUs · 126 products · 31 brands · 15 box types · 11,292 cases
+   The two breakdowns below are SKU counts (each sums to 238), NOT case counts:
+     aging   : 0-3(31) 3-6(50) 6-12(49) 12-24(85) 24+(23)
+     buckets : Baseball 79 · Basketball 36 · Entertainment 36 · Football 31
+               Other 19 · Contact Sports 15 · Soccer 10 · NIL 7
+               Formula One 3 · Tennis 2
+     mapping : Mapped/DN Live 184 · No Price 54
+   Case counts below sum to the real 11,292, but their bucket SHARES are mock —
+   real case shares are steeper than the SKU shares above (Baseball is 33% of
+   SKUs but 51% of cases). See the README's chart-level reference table for the
+   real per-bucket case and value totals. Replace this array with a Snowflake
+   query result at port time — nothing else reads data.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const META = {
+  asOf: '2026-09-01',
+  asOfLabel: 'Sep 2026',
+  generatedAt: '2026-09-14T09:12:00-07:00',
+};
+
+/* dnPrice === null means the SKU is unmapped: Mapping Status "No Price",
+   no Price Source, no Dealernet name, no listings. */
+const MOCK = [
+  { product:'2024 Topps Chrome Baseball Hobby',        dnName:'Topps Chrome 2024 Baseball Hobby',   boxType:'Hobby',     item:'TCB24-HOB',  brand:'MAJOR LEAGUE BASEBALL',                brandBucket:'Baseball',       qtyCases:1240, street:'2024-08-14', aging:'24+ Months',   boxesPerCase:12, packsPerBox:24, cardsPerPack:4,  unitCost:1850, dnPrice:2640, dnCount:14, dnLatest:'2026-09-02' },
+  { product:'2025 Bowman Baseball Hobby',              dnName:'Bowman 2025 Baseball Hobby',         boxType:'Hobby',     item:'BOW25-HOB',  brand:'MAJOR LEAGUE BASEBALL',                brandBucket:'Baseball',       qtyCases:1080, street:'2025-04-30', aging:'12-24 Months', boxesPerCase:12, packsPerBox:24, cardsPerPack:4,  unitCost:2120, dnPrice:2980, dnCount:9,  dnLatest:'2026-08-27' },
+  { product:'2026 Topps Series 1 Baseball Jumbo',      dnName:'Topps Series 1 2026 Jumbo',          boxType:'Jumbo',     item:'TS126-JMB',  brand:'MAJOR LEAGUE BASEBALL',                brandBucket:'Baseball',       qtyCases:860,  street:'2026-02-11', aging:'6-12 Months',  boxesPerCase:6,  packsPerBox:10, cardsPerPack:46, unitCost:1410, dnPrice:1890, dnCount:22, dnLatest:'2026-09-08' },
+  { product:'2026 Bowman Chrome Baseball Hobby',       dnName:null,                                 boxType:'Hobby',     item:'BCH26-HOB',  brand:'MAJOR LEAGUE BASEBALL',                brandBucket:'Baseball',       qtyCases:540,  street:'2026-07-22', aging:'0-3 Months',   boxesPerCase:12, packsPerBox:24, cardsPerPack:4,  unitCost:2460, dnPrice:null, dnCount:0,  dnLatest:null },
+
+  { product:'2025-26 Topps Chrome Basketball Hobby',   dnName:'Topps Chrome 2025-26 Basketball',    boxType:'Hobby',     item:'TCBK26-HOB', brand:'NATIONAL BASKETBALL ASSOCIATION',      brandBucket:'Basketball',     qtyCases:720,  street:'2026-01-28', aging:'6-12 Months',  boxesPerCase:12, packsPerBox:12, cardsPerPack:8,  unitCost:2980, dnPrice:4320, dnCount:18, dnLatest:'2026-09-10' },
+  { product:'2024-25 Topps Finest Basketball Hobby',   dnName:'Topps Finest 2024-25 Basketball',    boxType:'Hobby',     item:'TFBK25-HOB', brand:'NATIONAL BASKETBALL ASSOCIATION',      brandBucket:'Basketball',     qtyCases:610,  street:'2025-03-19', aging:'12-24 Months', boxesPerCase:8,  packsPerBox:6,  cardsPerPack:5,  unitCost:3240, dnPrice:4110, dnCount:6,  dnLatest:'2026-07-15' },
+  { product:'2026-27 Topps Basketball Blaster',        dnName:'Topps 2026-27 Basketball Blaster',   boxType:'Blaster',   item:'TBK27-BLS',  brand:'NATIONAL BASKETBALL ASSOCIATION',      brandBucket:'Basketball',     qtyCases:370,  street:'2026-08-05', aging:'0-3 Months',   boxesPerCase:20, packsPerBox:7,  cardsPerPack:8,  unitCost:640,  dnPrice:880,  dnCount:31, dnLatest:'2026-09-12' },
+
+  { product:'2025 Topps Star Wars Chrome Hobby',       dnName:'Topps Star Wars Chrome 2025',        boxType:'Hobby',     item:'SWC25-HOB',  brand:'STAR WARS',                            brandBucket:'Entertainment',  qtyCases:680,  street:'2025-06-11', aging:'12-24 Months', boxesPerCase:12, packsPerBox:18, cardsPerPack:4,  unitCost:1740, dnPrice:2290, dnCount:11, dnLatest:'2026-08-19' },
+  { product:'2026 Topps Disney 100 Hobby',             dnName:null,                                 boxType:'Hobby',     item:'DIS26-HOB',  brand:'DISNEY',                               brandBucket:'Entertainment',  qtyCases:590,  street:'2026-05-20', aging:'3-6 Months',   boxesPerCase:12, packsPerBox:20, cardsPerPack:5,  unitCost:1980, dnPrice:null, dnCount:0,  dnLatest:null },
+  { product:'2024 Topps Garbage Pail Kids Collector',  dnName:'GPK 2024 Collector Box',             boxType:'Collector', item:'GPK24-COL',  brand:'GARBAGE PAIL KIDS',                    brandBucket:'Entertainment',  qtyCases:420,  street:'2024-03-06', aging:'24+ Months',   boxesPerCase:16, packsPerBox:8,  cardsPerPack:5,  unitCost:760,  dnPrice:1140, dnCount:27, dnLatest:'2026-09-05' },
+
+  { product:'2025 Topps Chrome Football Hobby',        dnName:'Topps Chrome 2025 Football Hobby',   boxType:'Hobby',     item:'TCF25-HOB',  brand:'NATIONAL FOOTBALL LEAGUE',             brandBucket:'Football',       qtyCases:640,  street:'2025-11-12', aging:'6-12 Months',  boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:2540, dnPrice:3480, dnCount:15, dnLatest:'2026-09-09' },
+  { product:'2024 Topps Football Hobby',               dnName:'Topps 2024 Football Hobby',          boxType:'Hobby',     item:'TF24-HOB',   brand:'NATIONAL FOOTBALL LEAGUE',             brandBucket:'Football',       qtyCases:510,  street:'2024-10-02', aging:'12-24 Months', boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:2180, dnPrice:2760, dnCount:8,  dnLatest:'2026-06-28' },
+  { product:'2026 Topps Football Mega',                dnName:'Topps 2026 Football Mega',           boxType:'Mega',      item:'TF26-MEG',   brand:'NATIONAL FOOTBALL LEAGUE',             brandBucket:'Football',       qtyCases:320,  street:'2026-07-01', aging:'0-3 Months',   boxesPerCase:18, packsPerBox:10, cardsPerPack:10, unitCost:480,  dnPrice:690,  dnCount:24, dnLatest:'2026-09-11' },
+
+  { product:'2025 Topps Allen & Ginter Hobby',         dnName:'Allen & Ginter 2025 Hobby',          boxType:'Hobby',     item:'AG25-HOB',   brand:'TOPPS ORIGINALS',                      brandBucket:'Other',          qtyCases:520,  street:'2025-07-16', aging:'12-24 Months', boxesPerCase:12, packsPerBox:24, cardsPerPack:8,  unitCost:1620, dnPrice:2050, dnCount:10, dnLatest:'2026-08-04' },
+  { product:'2023 Topps Heritage Hobby',               dnName:null,                                 boxType:'Hobby',     item:'TH23-HOB',   brand:'TOPPS ORIGINALS',                      brandBucket:'Other',          qtyCases:380,  street:'2023-05-10', aging:'24+ Months',   boxesPerCase:12, packsPerBox:24, cardsPerPack:9,  unitCost:1340, dnPrice:null, dnCount:0,  dnLatest:null },
+
+  { product:'2025 Topps UFC Chrome Hobby',             dnName:'Topps UFC Chrome 2025',              boxType:'Hobby',     item:'UFC25-HOB',  brand:'ULTIMATE FIGHTING CHAMPIONSHIP',       brandBucket:'Contact Sports', qtyCases:410,  street:'2026-04-15', aging:'3-6 Months',   boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:2260, dnPrice:3140, dnCount:13, dnLatest:'2026-09-06' },
+  { product:'2024 Topps WWE Finest Hobby',             dnName:'Topps WWE Finest 2024',              boxType:'Hobby',     item:'WWE24-HOB',  brand:'WORLD WRESTLING ENTERTAINMENT',        brandBucket:'Contact Sports', qtyCases:270,  street:'2024-06-25', aging:'24+ Months',   boxesPerCase:8,  packsPerBox:6,  cardsPerPack:5,  unitCost:1890, dnPrice:2410, dnCount:7,  dnLatest:'2026-05-21' },
+
+  { product:'2025-26 Topps UEFA Chrome Hobby',         dnName:'Topps UEFA Chrome 2025-26',          boxType:'Hobby',     item:'UEFA26-HOB', brand:'UEFA CHAMPIONS LEAGUE',                brandBucket:'Soccer',         qtyCases:290,  street:'2026-03-04', aging:'6-12 Months',  boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:2740, dnPrice:3690, dnCount:12, dnLatest:'2026-09-07' },
+  { product:'2024-25 Topps Premier League Hobby',      dnName:'Topps Premier League 2024-25',       boxType:'Hobby',     item:'EPL25-HOB',  brand:'PREMIER LEAGUE',                       brandBucket:'Soccer',         qtyCases:160,  street:'2025-02-19', aging:'12-24 Months', boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:2410, dnPrice:2880, dnCount:5,  dnLatest:'2026-04-30' },
+
+  { product:'2025 Bowman University Chrome Hobby',     dnName:'Bowman U Chrome 2025',               boxType:'Hobby',     item:'BUC25-HOB',  brand:'NIL COLLEGIATE',                       brandBucket:'NIL',            qtyCases:210,  street:'2026-06-24', aging:'3-6 Months',   boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:1560, dnPrice:2120, dnCount:9,  dnLatest:'2026-09-03' },
+  { product:'2024 Bowman University Hobby',            dnName:null,                                 boxType:'Hobby',     item:'BU24-HOB',   brand:'NIL COLLEGIATE',                       brandBucket:'NIL',            qtyCases:130,  street:'2024-11-19', aging:'12-24 Months', boxesPerCase:12, packsPerBox:24, cardsPerPack:4,  unitCost:1280, dnPrice:null, dnCount:0,  dnLatest:null },
+
+  { product:'2025 Topps Formula 1 Chrome Hobby',       dnName:'Topps F1 Chrome 2025',               boxType:'Hobby',     item:'F125-HOB',   brand:'FORMULA ONE',                          brandBucket:'Formula One',    qtyCases:190,  street:'2025-09-24', aging:'12-24 Months', boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:3120, dnPrice:4480, dnCount:16, dnLatest:'2026-09-01' },
+
+  { product:'2026 Topps Tennis Chrome Hobby',          dnName:'Topps Tennis Chrome 2026',           boxType:'Hobby',     item:'TEN26-HOB',  brand:'ASSOCIATION OF TENNIS PROFESSIONALS',  brandBucket:'Tennis',         qtyCases:152,  street:'2026-07-05', aging:'0-3 Months',   boxesPerCase:12, packsPerBox:12, cardsPerPack:4,  unitCost:2890, dnPrice:3940, dnCount:4,  dnLatest:'2026-08-30' },
+];
+
+/* Derive the measures Sigma computes downstream of the source columns, so the
+   mock array stays small and internally consistent. */
+MOCK.forEach(d => {
+  d.mappingStatus  = d.dnPrice === null ? 'No Price' : 'Mapped';
+  d.priceSource    = d.dnPrice === null ? null : 'DN Live';
+  d.invValue       = d.unitCost * d.qtyCases;
+  d.wholesaleValue = d.dnPrice === null ? null : d.dnPrice * d.qtyCases;
+  d.marginPerCase  = d.dnPrice === null ? null : d.dnPrice - d.unitCost;
+  d.marginPct      = d.dnPrice === null ? null : (d.dnPrice - d.unitCost) / d.dnPrice;
+  d.totalProfit    = d.dnPrice === null ? null : d.marginPerCase * d.qtyCases;
+  d.markup         = d.dnPrice === null ? null : d.dnPrice / d.unitCost;
+  d.streetYear     = Number(d.street.slice(0, 4));
+});
+
+/* ── ORDERED CATEGORIES ───────────────────────────────────────────────────── */
+const AGING_ORDER = ['0-3 Months', '3-6 Months', '6-12 Months', '12-24 Months', '24+ Months'];
+const AGING_COLOR = {
+  '0-3 Months':   'var(--age-0-3)',
+  '3-6 Months':   'var(--age-3-6)',
+  '6-12 Months':  'var(--age-6-12)',
+  '12-24 Months': 'var(--age-12-24)',
+  '24+ Months':   'var(--age-24plus)',
+};
+
+/* Categorical palette carried over verbatim from the source (LINE_PALETTE,
+   line 2244) and relic_inventory_dash/charts.py:13 — identical values in all
+   three places means the Altair charts need no colour re-tuning. */
+const LINE_PALETTE = [
+  '#4d7ab8', '#16a34a', '#dc2626', '#b5822a', '#7c3aed', '#0891b2',
+  '#be185d', '#4b5563', '#ca8a04', '#059669', '#9333ea', '#e11d48',
+  '#2563eb', '#65a30d', '#c2410c', '#0f766e', '#a21caf', '#78716c',
+  '#1d4ed8', '#15803d',
+];
+const OTHER_GRAY = '#9ca3af';
+
+/* Stable brand-bucket colour: index by the real workbook ordering so a bucket
+   keeps its colour no matter what the filter leaves behind. 'Other' is gray. */
+const BRAND_ORDER = ['Baseball', 'Basketball', 'Entertainment', 'Football', 'Other',
+                     'Contact Sports', 'Soccer', 'NIL', 'Formula One', 'Tennis'];
+function brandColor(b) {
+  if (b === 'Other') return OTHER_GRAY;
+  const i = BRAND_ORDER.indexOf(b);
+  return LINE_PALETTE[(i < 0 ? BRAND_ORDER.length : i) % LINE_PALETTE.length];
+}
+
+/* ── FORMATTERS (output matches style.py's fmt / fmt2 / fmtq) ─────────────── */
+const NULL_CELL = '—';
+function fmt(v)      { return v === null || v === undefined ? NULL_CELL : '$' + Math.round(v).toLocaleString('en-US'); }
+function fmtAbbr(v) {
+  if (v === null || v === undefined) return NULL_CELL;
+  const a = Math.abs(v);
+  if (a >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
+  if (a >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+  if (a >= 1e3) return '$' + Math.round(v / 1e3).toLocaleString('en-US') + 'K';
+  return '$' + Math.round(v).toLocaleString('en-US');
+}
+function fmtQ(v)     { return v === null || v === undefined ? NULL_CELL : Math.round(v).toLocaleString('en-US'); }
+function fmtQAbbr(v) {
+  if (v === null || v === undefined) return NULL_CELL;
+  const a = Math.abs(v);
+  if (a >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (a >= 1e4) return Math.round(v / 1e3).toLocaleString('en-US') + 'K';
+  return Math.round(v).toLocaleString('en-US');
+}
+function fmtPct(v)   { return v === null || v === undefined ? NULL_CELL : (v * 100).toFixed(1) + '%'; }
+function fmtMult(v)  { return v === null || v === undefined ? NULL_CELL : v.toFixed(2) + '×'; }
+function fmtDate(v) {
+  if (!v) return NULL_CELL;
+  const [y, m, d] = v.split('-').map(Number);
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return MON[m - 1] + ' ' + d + ', ' + y;
+}
+function fmtStamp(iso) {
+  const dt = new Date(iso);
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let h = dt.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+  return MON[dt.getMonth()] + ' ' + dt.getDate() + ', ' + dt.getFullYear() +
+         ' ' + h + ':' + String(dt.getMinutes()).padStart(2, '0') + ' ' + ap;
+}
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                  .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   COLUMN SPEC — mirrors relic_inventory_dash/style.py's column-group machinery:
+   a group is (label, header_css, [(col_header, cell_fn, td_css)]). Drives the
+   two-row header, the body rows and the footer totals from one definition, so
+   the port maps onto _col_groups() / _table_html() with no restructuring.
+
+   Column ORDER is Sigma's, verbatim, from element z10oydAU5w.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const GROUPS = [
+  /* The anchor column sits outside every band — black header, pinned, and it
+     carries the cost/margin mini-bar under the product name. */
+  { label: '', css: '', cols: [
+    { key: 'product', header: 'PRODUCT NAME (ORACLE)', td: '', sortType: 'text',
+      cell: d => esc(d.product) + mixBar(d) },
+  ]},
+  { label: '◆ IDENTITY', css: 'th-identity', cols: [
+    { key: 'dnName',  header: 'DEALERNET NAME', td: 'td-left',          sortType: 'text', cell: d => d.dnName ? esc(d.dnName) : nullCell() },
+    { key: 'boxType', header: 'BOX TYPE',       td: 'td-left',          sortType: 'text', cell: d => esc(d.boxType) },
+    { key: 'item',    header: 'ITEM NUMBER',    td: 'td-left td-code',  sortType: 'text', cell: d => esc(d.item) },
+    { key: 'brand',   header: 'BRAND',          td: 'td-left td-muted', sortType: 'text', cell: d => esc(d.brand) },
+  ]},
+  { label: '◆ INVENTORY', css: 'th-inventory', cols: [
+    { key: 'qtyCases',    header: 'QTY (CASES)',   td: '',                 sortType: 'num',  cell: d => fmtQ(d.qtyCases),     total: r => fmtQ(sum(r, 'qtyCases')) },
+    { key: 'street',      header: 'STREET DATE',   td: 'td-muted',         sortType: 'text', cell: d => fmtDate(d.street) },
+    { key: 'aging',       header: 'AGING BUCKET',  td: 'td-left',          sortType: 'text', cell: d => agingChip(d.aging) },
+    { key: 'brandBucket', header: 'BRAND BUCKET',  td: 'td-left td-muted', sortType: 'text', cell: d => esc(d.brandBucket) },
+    { key: 'invValue',    header: 'INVENTORY VALUE', td: 'td-total',       sortType: 'num',  cell: d => fmt(d.invValue),      total: r => fmt(sum(r, 'invValue')), isTotal: true },
+  ]},
+  { label: '◆ PACK CONFIG', css: 'th-pack', cols: [
+    { key: 'boxesPerCase', header: 'BOXES / CASE', td: 'td-muted', sortType: 'num', cell: d => fmtQ(d.boxesPerCase) },
+    { key: 'packsPerBox',  header: 'PACKS / BOX',  td: 'td-muted', sortType: 'num', cell: d => fmtQ(d.packsPerBox) },
+    { key: 'cardsPerPack', header: 'CARDS / PACK', td: 'td-muted', sortType: 'num', cell: d => fmtQ(d.cardsPerPack) },
+  ]},
+  { label: '◆ PRICING', css: 'th-pricing', cols: [
+    { key: 'unitCost',       header: 'UNIT COST / CASE', td: '', sortType: 'num', cell: d => fmt(d.unitCost) },
+    { key: 'dnPrice',        header: 'DN PRICE / CASE',  td: '', sortType: 'num', cell: d => d.dnPrice === null ? nullCell() : fmt(d.dnPrice) },
+    { key: 'wholesaleValue', header: 'WHOLESALE VALUE',  td: '', sortType: 'num', cell: d => d.wholesaleValue === null ? nullCell() : fmt(d.wholesaleValue), total: r => fmt(sum(r, 'wholesaleValue')) },
+  ]},
+  { label: '◆ MARGIN', css: 'th-margin', cols: [
+    { key: 'marginPct',     header: 'MARGIN %',        td: '', sortType: 'num', cell: d => signed(d.marginPct, fmtPct), total: r => fmtPct(footMarginPct(r)) },
+    { key: 'totalProfit',   header: 'POTENTIAL PROFIT', td: '', sortType: 'num', cell: d => signed(d.totalProfit, fmt), total: r => fmt(sum(r, 'totalProfit')) },
+    { key: 'marginPerCase', header: 'MARGIN $ / CASE', td: '', sortType: 'num', cell: d => signed(d.marginPerCase, fmt) },
+  ]},
+  { label: '◆ DEALERNET MATCH', css: 'th-dealernet', cols: [
+    { key: 'priceSource', header: 'PRICE SOURCE', td: 'td-left', sortType: 'text', cell: d => priceSourcePill(d) },
+    { key: 'dnCount',     header: 'DN LISTINGS',  td: 'td-muted', sortType: 'num',  cell: d => d.dnCount ? fmtQ(d.dnCount) : nullCell(), total: r => fmtQ(sum(r, 'dnCount')) },
+    { key: 'dnLatest',    header: 'DN LATEST',    td: 'td-muted', sortType: 'text', cell: d => d.dnLatest ? fmtDate(d.dnLatest) : nullCell() },
+  ]},
+];
+const COLS = GROUPS.flatMap(g => g.cols);
+
+/* ── CELL BUILDERS ────────────────────────────────────────────────────────── */
+function nullCell() { return '<span style="color:#b8c2d4">' + NULL_CELL + '</span>'; }
+
+function agingChip(bucket) {
+  return '<span class="chip chip-age" style="background:' + AGING_COLOR[bucket] + '">' + esc(bucket) + '</span>';
+}
+function priceSourcePill(d) {
+  return d.priceSource
+    ? '<span class="status-pill pill-live">' + esc(d.priceSource) + '</span>'
+    : '<span class="status-pill pill-none">NO PRICE</span>';
+}
+function signed(v, f) {
+  if (v === null || v === undefined) return nullCell();
+  const cls = v >= 0 ? 'color:var(--pos)' : 'color:var(--neg)';
+  return '<span style="' + cls + '">' + f(v) + '</span>';
+}
+/* Cost / margin split for one case — the source's bar-in-cell, repointed. */
+function mixBar(d) {
+  if (d.dnPrice === null) {
+    return '<div class="mix-bar-wrap"><span class="mix-bar-seg" style="background:#d7dee9;width:100%"></span></div>';
+  }
+  const costPct = Math.max(0, Math.min(100, d.unitCost / d.dnPrice * 100));
+  return '<div class="mix-bar-wrap">' +
+    '<span class="mix-bar-seg" style="background:var(--accent);width:' + costPct.toFixed(1) + '%"></span>' +
+    '<span class="mix-bar-seg" style="background:var(--accent2);width:' + (100 - costPct).toFixed(1) + '%"></span>' +
+    '</div>';
+}
+
+/* ── AGGREGATION HELPERS ──────────────────────────────────────────────────── */
+function sum(rows, key) { return rows.reduce((a, d) => a + (d[key] || 0), 0); }
+function footMarginPct(rows) {
+  const ws = sum(rows, 'wholesaleValue');
+  return ws ? sum(rows, 'totalProfit') / ws : null;
+}
+function groupSum(rows, dimKey, valKey) {
+  const m = new Map();
+  rows.forEach(d => m.set(d[dimKey], (m.get(d[dimKey]) || 0) + (d[valKey] || 0)));
+  return m;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   STATE
+   ═══════════════════════════════════════════════════════════════════════════ */
+let statusFilter = 'A';               // A = all, S = Mapped, O = No Price
+let sortCol = 'invValue', sortAsc = false;
+let page = 0;
+const PAGE_SIZE = 12;
+let selectedItem = null;
+let VIEW = [];                        // the currently filtered row set
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FILTERING
+   ═══════════════════════════════════════════════════════════════════════════ */
+const FILTERS = [
+  { id: 'f-brandbucket', key: 'brandBucket', all: 'All Brand Buckets', order: BRAND_ORDER },
+  { id: 'f-aging',       key: 'aging',       all: 'All Aging Buckets', order: AGING_ORDER },
+  { id: 'f-year',        key: 'streetYear',  all: 'All Street Years' },
+  { id: 'f-boxtype',     key: 'boxType',     all: 'All Box Types' },
+  { id: 'f-pricesource', key: 'priceSource', all: 'All Price Sources' },
+];
+
+function populateFilters() {
+  FILTERS.forEach(f => {
+    const seen = new Set();
+    MOCK.forEach(d => { if (d[f.key] !== null && d[f.key] !== undefined) seen.add(d[f.key]); });
+    let opts = [...seen];
+    if (f.order) opts.sort((a, b) => f.order.indexOf(a) - f.order.indexOf(b));
+    else opts.sort((a, b) => String(a).localeCompare(String(b), 'en', { numeric: true }));
+    const sel = document.getElementById(f.id);
+    sel.innerHTML = '<option value="">' + f.all + '</option>' +
+      opts.map(o => '<option value="' + esc(o) + '">' + esc(o) + '</option>').join('');
+  });
+}
+
+function activeFilters() {
+  return FILTERS.map(f => ({ f, v: document.getElementById(f.id).value })).filter(x => x.v !== '');
+}
+
+function filteredRows() {
+  const q = document.getElementById('f-search').value.trim().toLowerCase();
+  const act = activeFilters();
+  return MOCK.filter(d => {
+    if (statusFilter === 'S' && d.mappingStatus !== 'Mapped')   return false;
+    if (statusFilter === 'O' && d.mappingStatus !== 'No Price') return false;
+    if (q && !(d.product.toLowerCase().includes(q) || d.item.toLowerCase().includes(q))) return false;
+    return act.every(({ f, v }) => String(d[f.key]) === v);
+  });
+}
+
+function setStatusFilter(code) {
+  statusFilter = code;
+  page = 0; selectedItem = null;
+  document.querySelectorAll('#mapping-toggle button').forEach(b => {
+    b.className = b.dataset.status !== code ? ''
+      : (code === 'A' ? 'active-all' : 'active-' + code);
+  });
+  applyFilters();
+}
+
+function clearGlobalFilters() {
+  document.getElementById('f-search').value = '';
+  FILTERS.forEach(f => { document.getElementById(f.id).value = ''; });
+  page = 0; selectedItem = null;
+  applyFilters();
+}
+
+/* The one interaction loop: every section re-renders from the filtered set. */
+function applyFilters() {
+  VIEW = filteredRows();
+  page = Math.min(page, Math.max(0, Math.ceil(VIEW.length / PAGE_SIZE) - 1));
+  if (selectedItem && !VIEW.some(d => d.item === selectedItem)) selectedItem = null;
+
+  const q = document.getElementById('f-search').value.trim();
+  const anyFilter = q !== '' || activeFilters().length > 0;
+  document.getElementById('f-badge').style.display = anyFilter ? '' : 'none';
+  document.getElementById('f-clear').style.display = anyFilter ? '' : 'none';
+
+  renderHeaderMeta();
+  updateContextBar(anyFilter);
+  renderStats();
+  renderCharts();
+  renderTable();
+  renderDetailPanel();
+}
+
+function updateContextBar(anyFilter) {
+  const LBL = { A: 'ALL MAPPING', S: 'MAPPED', O: 'NO PRICE' };
+  const st = document.getElementById('context-status');
+  st.textContent = LBL[statusFilter];
+  st.className = 'context-status' + (statusFilter === 'A' ? '' : ' status-' + statusFilter);
+
+  const vw = document.getElementById('context-view');
+  vw.textContent = anyFilter ? VIEW.length + ' OF ' + MOCK.length + ' SKUS' : 'ALL PRODUCTS';
+  vw.className = 'context-view' + (anyFilter ? ' view-filtered' : '');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   HEADER + KPI CARDS — the 6 Sigma KPI elements, in Sigma's order
+   ═══════════════════════════════════════════════════════════════════════════ */
+function renderHeaderMeta() {
+  document.getElementById('hdr-asof').textContent = META.asOfLabel;
+  document.getElementById('hdr-generated').textContent = fmtStamp(META.generatedAt);
+  document.getElementById('hdr-skus').textContent   = fmtQ(new Set(VIEW.map(d => d.item)).size);
+  document.getElementById('hdr-brands').textContent = fmtQ(new Set(VIEW.map(d => d.brand)).size);
+  document.getElementById('hdr-total').textContent  = fmtAbbr(sum(VIEW, 'invValue'));
+
+  const mapped = VIEW.filter(d => d.mappingStatus === 'Mapped').length;
+  document.getElementById('hdr-mapping-note').textContent =
+    mapped + ' MAPPED · ' + (VIEW.length - mapped) + ' NO PRICE';
+}
+
+function renderStats() {
+  const products = new Set(VIEW.map(d => d.product)).size;
+  const skus     = new Set(VIEW.map(d => d.item)).size;
+  const cases    = sum(VIEW, 'qtyCases');
+  const invVal   = sum(VIEW, 'invValue');
+  const mktVal   = sum(VIEW, 'wholesaleValue');
+  /* Sigma's own formula for element id4BY_TkHn:
+       Sum(DN Price x Qty) - Sum(Inventory Value)
+     Note it nets market value for PRICED SKUs against the valuation of ALL
+     SKUs, so unpriced inventory drags it down. Mirrored deliberately. */
+  const margin   = mktVal - invVal;
+  const priced   = VIEW.filter(d => d.dnPrice !== null);
+  const markup   = sum(priced, 'invValue') ? sum(priced, 'wholesaleValue') / sum(priced, 'invValue') : null;
+
+  const card = (cls, lbl, val, sub, color) =>
+    '<div class="stat-card ' + cls + '">' +
+      '<div class="stat-card-label">' + lbl + '</div>' +
+      '<div class="stat-card-value"' + (color ? ' style="color:' + color + '"' : '') + '>' + val + '</div>' +
+      '<div class="stat-card-sub">' + sub + '</div>' +
+    '</div>';
+
+  document.getElementById('stat-cards').innerHTML =
+    card('', '◆ # of Products', fmtQ(products),
+         new Set(VIEW.map(d => d.brandBucket)).size + ' brand buckets') +
+    card('', '◆ # of SKUs', fmtQ(skus),
+         new Set(VIEW.map(d => d.boxType)).size + ' box types') +
+    card('', '◆ # of Cases', fmtQAbbr(cases),
+         fmtQ(cases) + ' cases on hand') +
+    card('stat-card-total', 'Inventory Valuation', fmtAbbr(invVal),
+         'Oracle basis', 'var(--gold)') +
+    card('stat-card-market', '◆ Current Market Value', fmtAbbr(mktVal),
+         'Dealernet basis · ' + priced.length + ' priced SKUs', 'var(--accent2)') +
+    card('stat-card-margin', '◆ Unrealized Gross Margin', fmtAbbr(margin),
+         'Pre-royalty · vs. Oracle basis ' +
+         (markup === null ? '' : '<span class="chip chip-up">' + fmtMult(markup) + ' markup</span>'),
+         margin >= 0 ? 'var(--band-dealernet)' : 'var(--neg)');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CHARTS — hand-rolled inline SVG / CSS, no library. donutSvg() and hbars()
+   are the two functions that get swapped for Altair marks in charts.py.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const AGING_LEGEND_EL = document.getElementById('aging-legend');
+
+function renderAgingLegend() {
+  AGING_LEGEND_EL.innerHTML = AGING_ORDER.map(b =>
+    '<div class="legend-item"><div class="legend-dot" style="background:' + AGING_COLOR[b] + '"></div>' +
+    esc(b) + '</div>').join('');
+}
+
+/* Donut geometry, stated once the way buildMonthLines/buildValueMix state
+   their W/H/PAD box model in the source. */
+const DONUT = { W: 150, H: 150, R: 56, SW: 20 };
+
+function donutSvg(rows, total, fmtFn, centerLabel) {
+  const { W, H, R, SW } = DONUT;
+  const cx = W / 2, cy = H / 2, C = 2 * Math.PI * R;
+
+  if (!total) {
+    return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">' +
+      '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="none" stroke="#eef1f6" stroke-width="' + SW + '"/>' +
+      '<text x="' + cx + '" y="' + (cy + 4) + '" text-anchor="middle" class="donut-center-lbl">NO DATA</text></svg>';
+  }
+
+  let cum = 0;
+  const arcs = rows.filter(r => r.value > 0).map(r => {
+    const len = r.value / total * C;
+    const a = '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="none"' +
+      ' stroke="' + r.color + '" stroke-width="' + SW + '"' +
+      ' stroke-dasharray="' + len.toFixed(2) + ' ' + (C - len).toFixed(2) + '"' +
+      ' stroke-dashoffset="' + (-cum).toFixed(2) + '">' +
+      '<title>' + esc(r.label) + ': ' + fmtFn(r.value) +
+      ' (' + (r.value / total * 100).toFixed(1) + '%)</title></circle>';
+    cum += len;
+    return a;
+  }).join('');
+
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">' +
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="none" stroke="#eef1f6" stroke-width="' + SW + '"/>' +
+    '<g transform="rotate(-90 ' + cx + ' ' + cy + ')">' + arcs + '</g>' +
+    '<text x="' + cx + '" y="' + (cy - 1) + '" text-anchor="middle" class="donut-center-val">' + fmtFn(total) + '</text>' +
+    '<text x="' + cx + '" y="' + (cy + 14) + '" text-anchor="middle" class="donut-center-lbl">' + centerLabel + '</text>' +
+    '</svg>';
+}
+
+function donutLegend(rows, total, fmtFn) {
+  return '<div class="donut-legend">' + rows.map(r =>
+    '<div class="donut-legend-row">' +
+      '<span class="dl-dot" style="background:' + r.color + '"></span>' +
+      '<span>' + esc(r.label) + '</span>' +
+      '<span class="dl-val">' + fmtFn(r.value) + '</span>' +
+      '<span class="dl-pct">' + (total ? (r.value / total * 100).toFixed(1) : '0.0') + '%</span>' +
+    '</div>').join('') + '</div>';
+}
+
+function renderDonut(elId, valKey, fmtFn, centerLabel) {
+  const m = groupSum(VIEW, 'aging', valKey);
+  const rows = AGING_ORDER.map(b => ({ label: b, value: m.get(b) || 0, color: AGING_COLOR[b] }));
+  const total = rows.reduce((a, r) => a + r.value, 0);
+  document.getElementById(elId).innerHTML =
+    donutSvg(rows, total, fmtFn, centerLabel) + donutLegend(rows, total, fmtFn);
+}
+
+function hbars(rows, fmtFn) {
+  if (!rows.length) return '<div class="no-data">No inventory matches these filters.</div>';
+  const max = Math.max(...rows.map(r => r.value)) || 1;
+  return rows.map(r =>
+    '<div class="hbar-row" title="' + esc(r.label) + ': ' + fmtFn(r.value) + '">' +
+      '<span class="hbar-label">' + esc(r.label) + '</span>' +
+      '<span class="hbar-track">' +
+        '<span class="hbar-fill" style="background:' + r.color + ';width:' + (r.value / max * 100).toFixed(1) + '%"></span>' +
+      '</span>' +
+      '<span class="hbar-val">' + fmtFn(r.value) + '</span>' +
+    '</div>').join('');
+}
+
+function renderBrandBars(elId, valKey, fmtFn) {
+  const m = groupSum(VIEW, 'brandBucket', valKey);
+  const rows = [...m.entries()]
+    .map(([label, value]) => ({ label, value, color: brandColor(label) }))
+    .filter(r => r.value > 0)
+    .sort((a, b) => b.value - a.value);
+  document.getElementById(elId).innerHTML = hbars(rows, fmtFn);
+}
+
+function renderCharts() {
+  renderDonut('chart-aging-cases', 'qtyCases', fmtQAbbr, 'CASES');
+  renderDonut('chart-aging-value', 'invValue', fmtAbbr,  'VALUE');
+  renderBrandBars('chart-brand-cases', 'qtyCases', fmtQ);
+  renderBrandBars('chart-brand-value', 'invValue', fmtAbbr);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PRODUCT DETAIL TABLE
+   ═══════════════════════════════════════════════════════════════════════════ */
+function renderTableHeader() {
+  document.getElementById('group-row').innerHTML = GROUPS.map(g =>
+    g.label === ''
+      ? '<th></th>'
+      : '<th colspan="' + g.cols.length + '" class="' + g.css + '">' + g.label + '</th>'
+  ).join('');
+
+  document.getElementById('header-row').innerHTML = GROUPS.map(g =>
+    g.cols.map(c => {
+      const cls = [g.css, c.isTotal ? 'td-total' : '', c.key === sortCol ? 'sorted' : '']
+        .filter(Boolean).join(' ');
+      const arrow = c.key === sortCol ? (sortAsc ? '↑' : '↓') : '↕';
+      const op = c.key === sortCol ? '' : ' style="opacity:.3"';
+      return '<th' + (cls ? ' class="' + cls + '"' : '') +
+        ' onclick="sortBy(\'' + c.key + '\')">' + c.header +
+        ' <span class="sort-arrow"' + op + '>' + arrow + '</span></th>';
+    }).join('')
+  ).join('');
+}
+
+function sortBy(key) {
+  if (sortCol === key) sortAsc = !sortAsc;
+  else { sortCol = key; sortAsc = COLS.find(c => c.key === key).sortType === 'text'; }
+  page = 0;
+  renderTableHeader();
+  renderTable();
+}
+
+function sortedRows() {
+  const col = COLS.find(c => c.key === sortCol) || COLS[0];
+  const dir = sortAsc ? 1 : -1;
+  return [...VIEW].sort((a, b) => {
+    let x = a[sortCol], y = b[sortCol];
+    /* Nulls always sort last, whichever direction the column is going. */
+    if (x === null || x === undefined) return y === null || y === undefined ? 0 : 1;
+    if (y === null || y === undefined) return -1;
+    if (col.sortType === 'text') return String(x).localeCompare(String(y), 'en') * dir;
+    return (x - y) * dir;
+  });
+}
+
+function renderTable() {
+  const rows = sortedRows();
+  const tbody = document.getElementById('product-tbody');
+  const tfoot = document.getElementById('product-tfoot');
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td class="no-data" colspan="' + COLS.length + '">' +
+      'No products match these filters.</td></tr>';
+    tfoot.innerHTML = '';
+    renderPagination(0, 0);
+    document.getElementById('table-note').textContent = '';
+    return;
+  }
+
+  const start = page * PAGE_SIZE;
+  const pageRows = rows.slice(start, start + PAGE_SIZE);
+
+  tbody.innerHTML = pageRows.map(d => {
+    const sel = d.item === selectedItem ? ' class="selected"' : '';
+    const cells = GROUPS.map(g => g.cols.map(c =>
+      '<td' + (c.td ? ' class="' + c.td + '"' : '') + '>' + c.cell(d) + '</td>'
+    ).join('')).join('');
+    return '<tr' + sel + ' data-item="' + esc(d.item) + '" onclick="selectRow(\'' +
+      esc(d.item).replace(/'/g, "\\'") + '\')">' + cells + '</tr>';
+  }).join('');
+
+  /* Footer totals derive from the whole filtered set, not just this page — and
+     ratio columns (MARGIN %) recompute from the summed additive columns rather
+     than averaging the rows, matching style.py's cell_fn contract. */
+  tfoot.innerHTML = '<tr class="tfoot-row">' + GROUPS.map(g => g.cols.map((c, i) =>
+    '<td' + (c.td ? ' class="' + c.td + '"' : '') + '>' +
+    (g.label === '' && i === 0 ? 'TOTAL (' + rows.length + ' SKUs)'
+                               : (c.total ? c.total(rows) : '')) +
+    '</td>'
+  ).join('')).join('') + '</tr>';
+
+  document.getElementById('table-note').textContent =
+    COLS.length + ' columns · scroll sideways';
+  renderPagination(rows.length, Math.ceil(rows.length / PAGE_SIZE));
+}
+
+function renderPagination(n, pages) {
+  document.getElementById('pagination').innerHTML =
+    '<span class="pg-count">' + fmtQ(n) + ' SKUs · ' + fmtQ(sum(VIEW, 'qtyCases')) + ' cases</span>' +
+    '<span>Page ' + (pages ? page + 1 : 0) + ' of ' + pages + '</span>' +
+    '<button class="page-btn" onclick="setPage(' + (page - 1) + ')"' +
+      (page <= 0 ? ' disabled' : '') + '>← PREV</button>' +
+    '<button class="page-btn" onclick="setPage(' + (page + 1) + ')"' +
+      (page >= pages - 1 ? ' disabled' : '') + '>NEXT →</button>';
+}
+
+function setPage(p) { page = p; renderTable(); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ROW DRILL-DOWN — an inline expanding panel, not an overlay modal (the source
+   has no true modals either).
+   ═══════════════════════════════════════════════════════════════════════════ */
+function selectRow(item) {
+  selectedItem = selectedItem === item ? null : item;
+  renderTable();
+  renderDetailPanel();
+}
+function closeDetail() { selectedItem = null; renderTable(); renderDetailPanel(); }
+
+function renderDetailPanel() {
+  const host = document.getElementById('detail-panel');
+  const d = VIEW.find(r => r.item === selectedItem);
+  if (!d) { host.innerHTML = ''; return; }
+
+  const cell = (lbl, val, color) =>
+    '<div class="detail-cell"><div class="dc-lbl">' + lbl + '</div>' +
+    '<div class="dc-val"' + (color ? ' style="color:' + color + '"' : '') + '>' + val + '</div></div>';
+
+  host.innerHTML =
+    '<div class="detail-panel">' +
+      '<div class="detail-panel-header">' +
+        '<div class="detail-panel-title">' + esc(d.product) + '</div>' +
+        '<span class="detail-count-badge">' + esc(d.item) + '</span>' +
+        '<span class="detail-count-badge">' + esc(d.brandBucket) + '</span>' +
+        '<button class="close-btn" onclick="closeDetail()">✕ CLOSE</button>' +
+      '</div>' +
+      '<div class="detail-grid">' +
+        cell('Dealernet Name', d.dnName ? esc(d.dnName) : nullCell()) +
+        cell('Mapping Status', priceSourcePill(d)) +
+        cell('Aging Bucket', agingChip(d.aging)) +
+        cell('Street Date', fmtDate(d.street)) +
+        cell('Qty (Cases)', fmtQ(d.qtyCases)) +
+        cell('Pack Config', d.boxesPerCase + ' × ' + d.packsPerBox + ' × ' + d.cardsPerPack) +
+        cell('Inventory Value', fmt(d.invValue), 'var(--gold)') +
+        cell('Wholesale Value', d.wholesaleValue === null ? nullCell() : fmt(d.wholesaleValue), 'var(--accent2)') +
+        cell('Margin %', signed(d.marginPct, fmtPct)) +
+        cell('Potential Profit', signed(d.totalProfit, fmt)) +
+        cell('Markup Multiple', fmtMult(d.markup)) +
+        cell('DN Listings', d.dnCount ? fmtQ(d.dnCount) + ' · ' + fmtDate(d.dnLatest) : nullCell()) +
+      '</div>' +
+    '</div>';
+}
+
+/* Export is a stub in the template — the SiS port hands the filtered frame to
+   st.download_button instead of pulling in SheetJS. */
+function exportTable() {
+  alert('EXPORT XLS\n\nStub in the HTML template. In the Streamlit port this becomes\n' +
+        'st.download_button over the filtered DataFrame (' + VIEW.length + ' SKUs).');
+}
+
+/* ── BOOT ─────────────────────────────────────────────────────────────────── */
+populateFilters();
+renderAgingLegend();
+renderTableHeader();
+applyFilters();
+</script>
+
+</body>
+</html>
