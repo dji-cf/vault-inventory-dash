@@ -83,8 +83,36 @@ economics are questionable — the fix belongs upstream in Oracle, not here.
 
 **3. `brand_bucket` folds every unmapped brand into `'Other'`.** The bucket is a
 COALESCE over a 76-row mapping table, so `Other` mixes explicitly-mapped brands
-with unmapped ones and is coloured neutral gray for that reason. The header's
-brand count uses the **raw** `brand` column (31 distinct) and is unaffected.
+with unmapped ones and is coloured neutral gray for that reason. The bucket is
+keyed on the **raw** Oracle brand and caveat 3b leaves it that way, so it is
+unaffected by the brand merge.
+
+**3b. Oracle sends one brand under two spellings, and the app merges them.**
+`MLB` and `MAJOR LEAGUE BASEBALL` are one brand; so are `NBA`/`NATIONAL
+BASKETBALL ASSOCIATION`, `NFL`, `UFC`, `WWE`, `DIS`/`Disney`, `MRV`/`Marvel`,
+`STW`/`Star Wars`, `TEN`/`Tennis`, `CHP`/`UEFA Champions League`,
+`FOR`/`Formula 1 Racing` and `VFR`/`Brand Other`. Left raw, each one split into
+two table rows, two sort positions and two entries in the header's brand count.
+`transforms.BRAND_CANON` folds each long form onto the acronym and
+`data.load_inventory` applies it, so **31 raw spellings read as 20 brands**.
+The verbatim value survives as `brand_oracle` and as the export's
+*Brand (Oracle raw)* column.
+
+This is deliberately an **app-layer** step, not a `queries.py` change — the SQL
+stays reconciled to Sigma and its own 31-brand figure stays true. Two
+consequences to know:
+
+* `brand_bucket` still keys off the raw brand, so it is untouched and the
+  brand-bucket bars stay bit-for-bit identical to Sigma. `brand_mapping` maps
+  `CHP` → `Other` but `UEFA CHAMPIONS LEAGUE` → `Soccer` (and `TRB` → `Other`
+  while `TOP RANK BOXING` → `Contact Sports`), so the merged `CHP` brand
+  legitimately shows **both** `Soccer` (8 SKUs) and `Other` (13 SKUs) in the
+  table. Re-deriving the bucket from the canonical name would move ~$167k from
+  `Other` into `Soccer` and break that parity. Do not "fix" it without
+  re-reconciling against the prod workbook.
+* `BRAND_CANON` covers only pairs where **both** spellings exist in the view's
+  open records. Lone codes stay verbatim — `MCD` (McDonalds All American) and
+  `TRB` (Top Rank Boxing) are opaque but they are not duplicates.
 
 **4. Two KPIs deliberately do not reconcile.** *Unrealized Gross Margin* nets the
 market value of **priced** SKUs against the valuation of **all** SKUs, so
@@ -118,7 +146,8 @@ Reproduce these before trusting any change to `queries.py` or `transforms.py`.
 |---|---|
 | SKUs | 238 |
 | Products | 126 |
-| Brands (raw) | 31 |
+| Brands (canonical, what the header shows) | 20 |
+| Brands (raw Oracle spellings) | 31 |
 | Brand buckets | 10 |
 | Box types | 15 |
 | Cases | 11,292 |
@@ -153,6 +182,11 @@ on **2026-09-15**, including all 238 aging-bucket assignments and all 31
 brand→bucket mappings. The SQL reproduces Sigma exactly, so it is not the place
 to look first for a Sigma mismatch — check the aggregation in
 `transforms.stat_cards` instead.
+
+The brand merge of caveat 3b sits **downstream** of that reconciliation: it
+renames a display column on the loaded frame and touches no measure, so every
+figure above still holds. The one number it moves is the header's brand count,
+31 → 20.
 
 Aging bucket counts move as `CURRENT_DATE()` advances — the buckets are computed
 from `DATEDIFF` against today, so a SKU migrates from `0-3 Months` to

@@ -56,11 +56,14 @@ except Exception:  # any lookup failure means "no local zone" -> UTC-only toolti
 # Page-level only. @font-face rules are DOCUMENT-scoped, so importing the faces
 # once here makes them available inside the table component's shadow root too —
 # the component's own stylesheet does not need (and may ignore) an @import.
+# Two faces: Inter for everything visible, DM Mono for micro-labels. The relic
+# dashboard these merge into is Inter-only, so there is deliberately no display
+# face here — the logo and section labels use weighted Inter instead.
 # The template referenced 'DM Mono' 37 times without ever fetching it; this port
 # actually loads it. If the host cannot reach fonts.googleapis.com the stack
 # falls back to system faces: micro-label typography changes, layout does not.
 _FONT_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
 """
 
 # Tokens + box model. Needed in the page stylesheet for the chrome AND inside the
@@ -114,8 +117,8 @@ _TOKENS_CSS = """
 # panel (page), so they are shared rather than duplicated.
 _CHIP_CSS = """
 .fct .chip {
-  font-family: 'DM Mono', monospace; font-size: 9px; font-weight: 700;
-  padding: 1px 5px; border-radius: 4px; vertical-align: middle;
+  font-size: 10px; font-weight: 700;
+  padding: 1px 6px; border-radius: 4px; vertical-align: middle;
   white-space: nowrap; display: inline-block;
 }
 .fct .chip-up   { background: #dcfce7; color: #166534; }
@@ -179,11 +182,10 @@ _CHROME_CSS = """
   color: var(--on-navy); white-space: nowrap;
 }
 .fct .logo {
-  font-family: 'Bebas Neue', 'Inter', sans-serif;
-  font-size: 28px; letter-spacing: 2px;
+  font-size: 24px; font-weight: 700; letter-spacing: 1px;
   color: #ffffff; line-height: 1;
 }
-.fct .logo span { color: var(--on-navy); font-size: 18px; letter-spacing: 1px; }
+.fct .logo span { color: var(--on-navy); font-size: 15px; font-weight: 600; }
 
 .fct .dataset-selector-wrap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .fct .dataset-label {
@@ -197,7 +199,7 @@ _CHROME_CSS = """
 .fct .dataset-value.dim { color: rgba(255,255,255,.85); font-size: 12px; font-weight: 400; }
 .fct .dataset-sep { color: rgba(255,255,255,.4); margin: 0 6px; }
 
-.fct .hdr-meta { margin-left: auto; display: flex; gap: 26px; row-gap: 8px; flex-wrap: wrap; }
+.fct .hdr-meta { margin-left: auto; display: flex; gap: 26px; row-gap: 10px; flex-wrap: wrap; }
 .fct .hdr-meta > div {
   font-size: 10px; font-weight: 700; letter-spacing: .5px;
   color: var(--on-navy); text-transform: uppercase;
@@ -214,18 +216,19 @@ _CHROME_CSS = """
 
 /* ── SECTION LABELS ─────────────────────────────────────────────────────────
    The template declares .section-label but renders .trend-title instead;
-   revived here — it is the same ::after hairline device. */
+   revived here — it is the same ::after hairline device. Values match the relic
+   dashboard's .sec-title so the two read alike once merged. */
 .fct .section-label {
-  font-family: 'Bebas Neue', 'Inter', sans-serif;
-  font-size: 15px; letter-spacing: 3px;
+  font-size: 12px; font-weight: 700; letter-spacing: 1px;
+  text-transform: uppercase;
   color: var(--muted);
-  margin: 4px 0 12px;
+  margin: 8px 0 12px;
   display: flex; align-items: center; gap: 10px;
 }
 .fct .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
 /* ── LEGEND ─────────────────────────────────────────────────────────────────── */
-.fct .legend { display: flex; gap: 20px; margin-bottom: 16px; flex-wrap: wrap; }
+.fct .legend { display: flex; gap: 20px; margin-bottom: 14px; flex-wrap: wrap; }
 .fct .legend-item {
   display: flex; align-items: center; gap: 8px;
   font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace;
@@ -233,16 +236,16 @@ _CHROME_CSS = """
 .fct .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
 /* ── CONTEXT BAR ────────────────────────────────────────────────────────────── */
-.fct .context-bar { display: flex; align-items: center; gap: 10px; padding: 2px 0 10px; flex-wrap: wrap; }
+.fct .context-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; flex-wrap: wrap; }
 .fct .context-status, .fct .context-view {
   font-family: 'DM Mono', monospace;
-  font-size: 12px; font-weight: 600; letter-spacing: 1px;
-  padding: 3px 10px; border-radius: 5px; color: #fff;
+  font-size: 12px; font-weight: 700; letter-spacing: .8px;
+  padding: 4px 11px; border-radius: 5px; color: #fff;
 }
 .fct .context-status { background: var(--gold); }
 .fct .context-status.status-S { background: var(--accent2); }
 .fct .context-status.status-O { background: var(--neg); }
-.fct .context-sep { color: var(--muted); font-size: 14px; }
+.fct .context-sep { color: var(--muted); }
 .fct .context-view { background: #5a7fbf; }
 .fct .context-view.view-filtered { background: #7b52ab; }
 
@@ -258,9 +261,9 @@ _CHROME_CSS = """
 /* ── STAT CARDS ─────────────────────────────────────────────────────────────── */
 .fct .stat-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 14px;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
 .fct .stat-card {
   background: var(--surface);
@@ -286,22 +289,27 @@ _CHROME_CSS = """
   font-variant-numeric: tabular-nums;
 }
 
-/* ── CHARTS ─────────────────────────────────────────────────────────────────── */
+/* ── CHARTS ───────────────────────────────────────────────────────────────────
+   The relic dashboard renders its charts through Altair, so their text picks up
+   the theme font (Inter) rather than DM Mono, and they sit on the same surface
+   treatment as its .table-wrap: radius 8px plus a soft shadow, no border. Both
+   are mirrored here so the hand-built donuts read as the same family of chart.
+   The aging ramp colours are deliberately NOT touched — that sequential encoding
+   is shared with the table's Aging Bucket chips. */
 .fct .chart-wrap {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
   padding: 18px 22px 14px;
   overflow-x: auto;
   height: 100%;
 }
 .fct .chart-wrap svg { display: block; }
 .fct .chart-title {
-  font-family: 'DM Mono', monospace;
-  font-size: 11px; letter-spacing: 1px; color: var(--muted);
+  font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted);
   text-transform: uppercase; margin-bottom: 14px;
 }
-.fct .chart-title b { color: var(--text); font-weight: 500; }
+.fct .chart-title b { color: var(--text); font-weight: 700; }
 
 /* Donut: SVG on the left, itemised legend on the right. */
 .fct .donut-row { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
@@ -310,14 +318,14 @@ _CHROME_CSS = """
   fill: #1a2b4a; font-variant-numeric: tabular-nums;
 }
 .fct .donut-center-lbl {
-  font-family: 'DM Mono', monospace; font-size: 9px;
-  fill: #6b7fa3; letter-spacing: 1px;
+  font-family: 'Inter', sans-serif; font-size: 9px; font-weight: 700;
+  fill: #6b7fa3; letter-spacing: .7px;
 }
 .fct .donut-legend { flex: 1; min-width: 190px; display: flex; flex-direction: column; gap: 6px; }
 .fct .donut-legend-row {
   display: grid; grid-template-columns: 10px 1fr auto auto;
   align-items: center; gap: 8px;
-  font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted);
+  font-size: 12px; color: var(--muted);
 }
 .fct .donut-legend-row .dl-dot { width: 10px; height: 10px; border-radius: 2px; }
 .fct .donut-legend-row .dl-val { color: var(--text); font-variant-numeric: tabular-nums; }
@@ -328,11 +336,11 @@ _CHROME_CSS = """
 .fct .hbar-row {
   display: grid; grid-template-columns: 112px 1fr 76px;
   align-items: center; gap: 10px;
-  font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted);
+  font-size: 12px; color: var(--muted);
 }
 .fct .hbar-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fct .hbar-track { background: var(--surface2); border-radius: 3px; height: 14px; overflow: hidden; }
-.fct .hbar-fill { height: 100%; border-radius: 3px; }
+.fct .hbar-fill { display: block; height: 100%; border-radius: 3px; }
 .fct .hbar-val { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 
 /* ── DETAIL PANEL (row drill-down) ─────────────────────────────────────────── */
@@ -354,8 +362,7 @@ _CHROME_CSS = """
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .fct .detail-panel-title {
-  font-family: 'Bebas Neue', 'Inter', sans-serif;
-  font-size: 18px; color: #fff; letter-spacing: 1.5px;
+  font-size: 16px; font-weight: 700; color: #fff; letter-spacing: .5px;
 }
 .fct .detail-count-badge {
   background: rgba(255,255,255,.12);
@@ -390,11 +397,11 @@ _TABLE_CSS = """
 
 .fct thead th {
   background: var(--navy);
-  padding: 8px 12px;
+  padding: 4px 5px;
   text-align: right;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: .4px;
+  letter-spacing: .3px;
   text-transform: uppercase;
   color: #ffffff;
   white-space: nowrap;
@@ -409,11 +416,11 @@ _TABLE_CSS = """
 .fct .col-group-header th {
   background: var(--navy-deep);
   color: #ffffff;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 800;
-  letter-spacing: .5px;
+  letter-spacing: .3px;
   text-transform: uppercase;
-  padding: 6px 12px;
+  padding: 3px 5px;
   text-align: center;
   border-bottom: 1px solid rgba(255,255,255,.06);
   cursor: default;
@@ -432,12 +439,12 @@ _TABLE_CSS = """
 /* Inventory Value is the authoritative measure — it gets the gold treatment the
    template reserves for its TOTAL VALUE column. */
 .fct thead th.td-total { background: var(--gold) !important; color: #fff !important; }
-.fct .td-total { font-weight: 700; color: #000000; font-size: 13px; }
+.fct .td-total { font-weight: 700; color: #000000; font-size: 11px; }
 
 .fct td {
-  padding: 9px 12px;
+  padding: 4px 5px;
   text-align: right;
-  font-size: 12px;
+  font-size: 10.5px;
   font-variant-numeric: tabular-nums;
   border-bottom: 1px solid var(--border);
   color: var(--text);
@@ -445,9 +452,9 @@ _TABLE_CSS = """
 }
 .fct td:first-child {
   text-align: left;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 500;
-  max-width: 320px;
+  max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -456,7 +463,7 @@ _TABLE_CSS = """
 .fct td.td-pos   { color: var(--pos); }
 .fct td.td-neg   { color: var(--neg); }
 .fct td.td-null  { color: #b8c2d4; }
-.fct td.td-code  { font-family: 'DM Mono', monospace; font-size: 11px; }
+.fct td.td-code  { font-family: 'DM Mono', monospace; font-size: 10px; }
 
 .fct tbody tr[data-key] { cursor: pointer; }
 .fct tbody tr:hover { background: var(--surface2); }
@@ -464,13 +471,13 @@ _TABLE_CSS = """
 .fct tbody tr.selected td:first-child { padding-left: 13px; }
 
 .fct .tfoot-row { background: var(--surface2); border-top: 2px solid var(--border); }
-.fct .tfoot-row td { font-weight: 700; font-size: 12px; }
+.fct .tfoot-row td { font-weight: 700; font-size: 10.5px; }
 
 /* Bar-in-cell under the product name: cost / margin split per case. */
 .fct .mix-bar-wrap {
   display: flex; gap: 2px; height: 4px;
   border-radius: 3px; overflow: hidden;
-  width: 100px; margin-top: 4px;
+  width: 80px; margin-top: 3px;
 }
 .fct .mix-bar-seg { height: 100%; }
 .fct .sub-label { color: var(--muted); font-size: 10px; font-weight: 400; }
@@ -1063,7 +1070,7 @@ GROUPS = [
         _col("dealernet_name", "DEALERNET NAME", "td-left", "text", _text_cell("dealernet_name")),
         _col("box_type", "BOX TYPE", "td-left", "text", _text_cell("box_type")),
         _col("item_number", "ITEM NUMBER", "td-left td-code", "text", _text_cell("item_number")),
-        _col("brand", "BRAND", "td-left td-muted", "text", _text_cell("brand")),
+        _col("brand_bucket", "BRAND BUCKET", "td-left td-muted", "text", _text_cell("brand_bucket")),
     ]),
     ("&#9670; INVENTORY", "th-inventory", [
         _col("quantity_cases", "QTY (CASES)", "", "num",
@@ -1071,7 +1078,7 @@ GROUPS = [
         _col("street_date", "STREET DATE", "td-muted", "num", _date_cell("street_date")),
         _col("aging_bucket", "AGING BUCKET", "td-left", "text",
              lambda r: _aging_chip(r["aging_bucket"])),
-        _col("brand_bucket", "BRAND BUCKET", "td-left td-muted", "text", _text_cell("brand_bucket")),
+        _col("brand", "BRAND", "td-left td-muted", "text", _text_cell("brand")),
         _col("inventory_value", "INVENTORY VALUE", "td-total", "num",
              _num_cell("inventory_value", tx.fmt), _sum_total("inventory_value", tx.fmt)),
     ]),

@@ -12,11 +12,11 @@ linkColor = "#4d7ab8"
 baseFontSize = 14
 baseRadius = "8px"
 
-# The template's three faces. Bebas Neue drives the logo + section labels and
-# DM Mono every micro-label; both are also @imported in style.py so they reach
-# the shadow-DOM table component, which this file cannot style.
+# Two faces, matching the relic dashboard these merge into: Inter for body AND
+# headings, DM Mono for every micro-label. DM Mono is also @imported in style.py
+# so it reaches the shadow-DOM table component, which this file cannot style.
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-headingFont = "Bebas Neue:https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
 codeFont = "DM Mono:https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap"
 
 # Semantic measures from the template

@@ -87,7 +87,7 @@ def _clear_filters() -> None:
 # Approximate row / (header + footer) heights for the custom table, used to turn
 # a rows-per-view choice into a max-height in px.
 ROWS_OPTS = [10, 25, 50, 100, "All"]
-_ROW_PX, _HEAD_PX = 46, 78
+_ROW_PX, _HEAD_PX = 30, 44
 
 
 def _cap_px(rows) -> int | None:

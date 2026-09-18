@@ -195,6 +195,65 @@ def brand_color(bucket) -> str:
     return LINE_PALETTE[i % len(LINE_PALETTE)]
 
 
+# ── brand naming drift ────────────────────────────────────────────────────────
+# Oracle sends one brand under two spellings — an acronym and the spelled-out
+# name — and the vault view stores whichever the order used. Left alone that
+# splits a brand in two everywhere the raw brand column surfaces: the table's
+# BRAND cell, the sort, the export, and the Brands header fact (31 instead of
+# 20). Each key below is a long form folded onto the acronym Oracle itself uses;
+# the acronyms need no entry, they are already the target.
+#
+# Deliberately covers ONLY pairs where BOTH spellings exist in the source view's
+# open records. Lone codes are left verbatim — MCD (McDonalds All American) and
+# TRB (Top Rank Boxing) are opaque but they are not duplicates, and inventing a
+# label for them here would be a second, unrelated change. Keys are UPPER+TRIM
+# because Oracle's casing drifts, which is also why ``brand_mapping`` in
+# queries.py carries 'major league baseball' next to 'MAJOR LEAGUE BASEBALL'.
+# Every decoding came from the code's own PRODUCT_NAME in the vault view.
+BRAND_CANON = {
+    "MAJOR LEAGUE BASEBALL": "MLB",
+    "NATIONAL BASKETBALL ASSOCIATION": "NBA",
+    "NATIONAL FOOTBALL LEAGUE": "NFL",
+    "ULTIMATE FIGHTING CHAMPIONSHIP": "UFC",
+    "WORLD WRESTLING ENTERTAINMENT": "WWE",
+    "DISNEY": "DIS",
+    "MARVEL": "MRV",
+    "STAR WARS": "STW",
+    "TENNIS": "TEN",
+    "UEFA CHAMPIONS LEAGUE": "CHP",
+    # FOR's rows are hidden by the dashboard's own quantity > 0 rule today, so
+    # only the long form currently reaches the table. Folded anyway: both
+    # spellings are live in the view's open records, and the split would
+    # reappear the moment a FOR row gains quantity.
+    "FORMULA 1 RACING": "FOR",
+    # 'Brand Other' is not a brand, it is the VeeFriends line under a
+    # placeholder label; VFR is the same product. Both bucket to 'Other'.
+    "BRAND OTHER": "VFR",
+}
+
+
+def canonical_brand(s: pd.Series) -> pd.Series:
+    """Fold each long-form brand spelling onto its Oracle acronym.
+
+    Anything absent from ``BRAND_CANON`` passes through verbatim, including
+    NULL — an unrecognised brand must stay visible under its own name rather
+    than collapse into a catch-all, which is the trap ``brand_bucket``'s 'Other'
+    COALESCE already sets (README caveat 3).
+
+    Deliberately does NOT touch ``brand_bucket``: that column is keyed on the
+    RAW brand in SQL, and Sigma buckets CHP as 'Other' while bucketing UEFA
+    CHAMPIONS LEAGUE as 'Soccer' (likewise TRB vs TOP RANK BOXING). Re-deriving
+    the bucket from the canonical name here would move ~$167k out of 'Other'
+    into 'Soccer' — defensible in the abstract, but it breaks brand-bucket
+    parity with the prod workbook. So a merged brand can legitimately show two
+    bucket values in the table, and that is why the bar charts are unaffected.
+    """
+    # astype(str) renders a null as the string "None", which is not a key, so a
+    # null brand falls through the where() and stays null.
+    key = s.astype(str).str.upper().str.strip()
+    return s.where(~key.isin(BRAND_CANON), key.map(BRAND_CANON))
+
+
 # Mapping-status toggle: display label -> code, and code -> the value to match.
 MAPPING_OPTS = {"ALL": "A", "MAPPED": "S", "NO PRICE": "O"}
 MAPPING_LABELS = {"A": "ALL MAPPING", "S": "MAPPED", "O": "NO PRICE"}
@@ -287,8 +346,13 @@ def _dcount(df: pd.DataFrame, col: str) -> int:
 def header_meta(df: pd.DataFrame) -> dict:
     """The header's right-hand facts plus the mapping split.
 
-    ``brands`` counts the RAW Oracle brand, not ``brand_bucket`` — the bucket
-    column folds every unmapped brand into 'Other', so counting it would
+    ``brands`` counts the CANONICAL brand — ``data.load_inventory`` folds
+    Oracle's duplicate spellings (MLB / MAJOR LEAGUE BASEBALL) onto one label
+    via ``canonical_brand``, so this reads 20 where the raw column has 31
+    spellings. ``brand_oracle`` still carries the verbatim Oracle value.
+
+    Counting ``brand_bucket`` instead would still be wrong, for the original
+    reason: the bucket folds every unmapped brand into 'Other', which would
     understate the real brand spread.
     """
     mapped = int((df["mapping_status"] == "Mapped").sum())
@@ -402,11 +466,12 @@ _EXPORT_COLS = [
     ("dealernet_name", "Dealernet Name"),
     ("box_type", "Box Type"),
     ("item_number", "Item Number"),
-    ("brand", "Brand"),
+    ("brand_bucket", "Brand Bucket"),
     ("quantity_cases", "Qty (Cases)"),
     ("street_date", "Street Date"),
     ("aging_bucket", "Aging Bucket"),
-    ("brand_bucket", "Brand Bucket"),
+    ("brand", "Brand"),
+    ("brand_oracle", "Brand (Oracle raw)"),
     ("inventory_value", "Inventory Value"),
     ("boxes_per_case", "Boxes / Case"),
     ("packs_per_box", "Packs / Box"),

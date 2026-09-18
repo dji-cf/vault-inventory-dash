@@ -206,4 +206,20 @@ def load_inventory() -> tuple[pd.DataFrame, datetime]:
     # (oldest last) and keeps empty buckets visible as zero rows.
     df["aging_bucket"] = tx.as_aging_category(df["aging_bucket"])
 
+    # Oracle sends one brand under two spellings, so the raw column splits a
+    # brand across two table rows, two sort positions, two export rows and two
+    # entries in the Brands header fact. Fold them HERE — inside the cache, on
+    # the whole snapshot — so the table, the sort, the export and the KPI all
+    # agree; doing it at render time would fix the visible cell and leave the
+    # header at 31. brand_oracle keeps the verbatim value and needs no entry in
+    # _TEXT_COLS, having been copied after that loop already ran.
+    df["brand_oracle"] = df["brand"]
+    df["brand"] = tx.canonical_brand(df["brand"])
+
+    # The SQL's ORDER BY sorts on the RAW brand, so merged spellings arrive
+    # interleaved. Re-sort on the canonical value to restore the intended
+    # default table order; mergesort is stable, so street_date ties hold.
+    df = df.sort_values(["brand", "street_date"], kind="mergesort",
+                        na_position="last").reset_index(drop=True)
+
     return df, pulled_at
