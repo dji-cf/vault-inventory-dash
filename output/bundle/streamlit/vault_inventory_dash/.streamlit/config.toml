@@ -12,12 +12,13 @@ linkColor = "#4d7ab8"
 baseFontSize = 14
 baseRadius = "8px"
 
-# Two faces, matching the relic dashboard these merge into: Inter for body AND
-# headings, DM Mono for every micro-label. DM Mono is also @imported in style.py
-# so it reaches the shadow-DOM table component, which this file cannot style.
+# ONE face: Inter for body, headings AND code, so nothing on the page can render
+# in a second typeface. DM Mono was dropped - it read as a competing face beside
+# the native widgets. Inter is also @imported in style.py so it reaches the
+# shadow-DOM table component, which this file cannot style.
 font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
 headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@600;700&display=swap"
-codeFont = "DM Mono:https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&display=swap"
+codeFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500&display=swap"
 
 # Semantic measures from the template
 blueColor = "#4d7ab8"

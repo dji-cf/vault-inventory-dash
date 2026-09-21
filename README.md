@@ -300,7 +300,11 @@ app dies on first import, so confirm the artifact list after adding a module.
 | HTML | Here | Why |
 |---|---|---|
 | `wholesale = dnPrice × qty` | `market_value` gross for the KPIs, `wholesale_value` `× 0.8` for the table column and margins | The mock predates the validated query; Sigma splits the two bases this way |
-| `AS OF: Sep 2026` | `LIVE SNAPSHOT` + `DATA PULLED` | No as-of dimension exists in the view |
+| `AS OF: Sep 2026` | `As Of` `Live Snapshot` + `Data Pulled` | No as-of dimension exists in the view |
+| Bebas Neue + Inter + DM Mono | **Inter only** | Bebas went in `53b8fcd`; DM Mono followed — as the micro-label face it read as a competing typeface beside the native widgets. `font-variant-numeric: tabular-nums` replaces its digit alignment |
+| ALL-CAPS labels, wide tracking | **Title Case**, tracking 0 | Requested directly. Every `text-transform: uppercase` is gone and the paired `letter-spacing` was zeroed with it — tracking existed to open up caps. Acronyms (SKUs, DN, CSV, UTC, NIL) and the Oracle brand codes stay upper |
+| `.logo` 28px Bebas, muted `/ Dealernet` | 24px Inter **500**, `/ Dealernet` size-only | Unbolded on request; the qualifier now shares the title's face, weight and white |
+| `.header-row` centers everything | `.hdr-title-group` baseline-aligns title + freshness | One `align-items` cannot serve both a 24px title and the two-line `.hdr-meta` stack |
 | 12-row pagination | Scroll cap + rows-per-view | The template's own comments specify this for the port |
 | `onclick` sortable headers | `data-sort` + component trigger | Same behaviour; SiS forbids inline handlers |
 | `exportTable()` alert stub | `st.download_button` | The template flags it as a stub for the port |

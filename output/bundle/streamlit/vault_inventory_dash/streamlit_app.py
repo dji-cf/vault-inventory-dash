@@ -12,7 +12,7 @@ Two intentional departures from the template, both flagged in its own comments:
   totals then cover exactly what is on screen.
 * **The XLS export is real.** The template's ``exportTable()`` is an ``alert()``
   stub that names ``st.download_button`` as its replacement.
-* **The MAPPING toggle sits just below the header rather than inside it.** The
+* **The Mapping toggle sits just below the header rather than inside it.** The
   template carries it in the header's second row, but a native Streamlit widget
   cannot live inside an HTML string, so that row becomes a navy strip closing the
   header card: same chrome, one extra element. The header card renders above the
@@ -43,13 +43,13 @@ ss = st.session_state
 # ── session state ────────────────────────────────────────────────────────────
 # Public widget keys are plain names; `_{key}_last` shadows a segmented control's
 # last good value so `_sticky` can restore it (see below).
-ss.setdefault("mapping", "ALL")
+ss.setdefault("mapping", "All")
 ss.setdefault("_mapping_last", ss["mapping"])
 ss.setdefault("f_search", "")
 for _key, _col, _all_label in tx.FILTER_SPECS:
     ss.setdefault(_key, "")
 ss.setdefault("sort_col", "inventory_value")   # the gold column, descending
-ss.setdefault("sort_dir", "↓ DESC")
+ss.setdefault("sort_dir", "↓ Desc")
 ss.setdefault("_sort_dir_last", ss["sort_dir"])
 ss.setdefault("selected_item", "—")
 ss.setdefault("rows", 25)
@@ -67,7 +67,7 @@ for _key, _col, _all_label in tx.FILTER_SPECS:
 def _sticky(key: str) -> None:
     """Keep exactly one segment selected.
 
-    ``st.segmented_control`` returns None when the user clicks the ALREADY active
+    ``st.segmented_control`` returns None when the user clicks the already-active
     segment, which would blank the control and silently widen the view. Restore
     the last value instead.
     """
@@ -117,8 +117,8 @@ flt = tx.apply_filters(df_all, mapping=mapping_code, search=ss["f_search"],
 any_filter = bool(ss["f_search"].strip()) or any(selections.values())
 cards = tx.stat_cards(flt)
 meta = tx.header_meta(flt)
-view_label = (f"{tx.fmtq(len(flt))} OF {tx.fmtq(len(df_all))} SKUS"
-              if any_filter else "ALL PRODUCTS")
+view_label = (f"{tx.fmtq(len(flt))} of {tx.fmtq(len(df_all))} SKUs"
+              if any_filter else "All Products")
 
 # ── chrome: header, KPI cards, context echo ──────────────────────────────────
 style.render(style.header_html(meta, pulled_at), container=hdr_slot)
@@ -189,22 +189,22 @@ if notes:
     st.caption("  \n".join(notes))
 
 # ── aging composition ────────────────────────────────────────────────────────
-style.render(style.section_label_html("AGING COMPOSITION"), style.legend_html())
+style.render(style.section_label_html("Aging Composition"), style.legend_html())
 a1, a2 = st.columns(2)
 # raw=True: these are the only SVG on the page, and st.html's DOMPurify profile
 # carries no svg tag set, so the rings would be stripped. See style.render().
 style.render(style.donut_card_html(
     "Aging composition by", "# of Cases",
-    tx.aging_composition(flt, "quantity_cases"), tx.fmtq_abbr, "CASES"),
+    tx.aging_composition(flt, "quantity_cases"), tx.fmtq_abbr, "Cases"),
     container=a1, raw=True)
 style.render(style.donut_card_html(
     "Aging composition by", "Inventory Value",
-    tx.aging_composition(flt, "inventory_value"), tx.fmt_abbr, "VALUE"),
+    tx.aging_composition(flt, "inventory_value"), tx.fmt_abbr, "Value"),
     container=a2, raw=True)
 
 # ── inventory by brand ───────────────────────────────────────────────────────
 # Sorted bars, not donuts: Brand Bucket has 10 categories.
-style.render(style.section_label_html("INVENTORY BY BRAND"))
+style.render(style.section_label_html("Inventory by Brand"))
 b1, b2 = st.columns(2)
 style.render(style.hbars_card_html(
     "Inventory by brand —", "# of Cases",
@@ -214,10 +214,10 @@ style.render(style.hbars_card_html(
     tx.brand_composition(flt, "inventory_value"), tx.fmt_abbr), container=b2)
 
 # ── product detail ───────────────────────────────────────────────────────────
-style.render(style.section_label_html("PRODUCT DETAIL"))
+style.render(style.section_label_html("Product Detail"))
 
 _SORT_LABELS = {k: h for k, h in style.SORT_OPTIONS}
-_ASC, _DESC = "↑ ASC", "↓ DESC"
+_ASC, _DESC = "↑ Asc", "↓ Desc"
 s1, s2, s3, s4 = st.columns([2, 1, 1, 1.2])
 s1.selectbox("Sort by", [k for k, _h in style.SORT_OPTIONS], key="sort_col",
              format_func=lambda k: _SORT_LABELS[k], label_visibility="collapsed",
@@ -229,7 +229,7 @@ s3.selectbox("Rows per view", ROWS_OPTS, key="rows", label_visibility="collapsed
              help="Rows shown before the table scrolls")
 
 payload, ext, mime = tx.to_excel(tx.export_frame(flt))
-s4.download_button(f"⬇ EXPORT {ext.upper()}", payload, key="export",
+s4.download_button(f"⬇ Export {ext.upper()}", payload, key="export",
                    file_name=f"vault_inventory_{pulled_at:%Y%m%d}.{ext}",
                    mime=mime, width="stretch",
                    help="The filtered rows, with raw values rather than formatted text")

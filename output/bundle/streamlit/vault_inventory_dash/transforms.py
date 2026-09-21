@@ -255,8 +255,8 @@ def canonical_brand(s: pd.Series) -> pd.Series:
 
 
 # Mapping-status toggle: display label -> code, and code -> the value to match.
-MAPPING_OPTS = {"ALL": "A", "MAPPED": "S", "NO PRICE": "O"}
-MAPPING_LABELS = {"A": "ALL MAPPING", "S": "MAPPED", "O": "NO PRICE"}
+MAPPING_OPTS = {"All": "A", "Mapped": "S", "No Price": "O"}
+MAPPING_LABELS = {"A": "All Mapping", "S": "Mapped", "O": "No Price"}
 _MAPPING_MATCH = {"S": "Mapped", "O": "No Price"}
 
 

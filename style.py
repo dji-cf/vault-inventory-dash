@@ -56,14 +56,16 @@ except Exception:  # any lookup failure means "no local zone" -> UTC-only toolti
 # Page-level only. @font-face rules are DOCUMENT-scoped, so importing the faces
 # once here makes them available inside the table component's shadow root too —
 # the component's own stylesheet does not need (and may ignore) an @import.
-# Two faces: Inter for everything visible, DM Mono for micro-labels. The relic
-# dashboard these merge into is Inter-only, so there is deliberately no display
-# face here — the logo and section labels use weighted Inter instead.
-# The template referenced 'DM Mono' 37 times without ever fetching it; this port
-# actually loads it. If the host cannot reach fonts.googleapis.com the stack
-# falls back to system faces: micro-label typography changes, layout does not.
+# ONE face: Inter, at every size and weight the chrome uses. The template paired
+# it with DM Mono for micro-labels, but that read as a second, competing typeface
+# beside the native Streamlit widgets — the filter bar and the aging legend in
+# particular — so the dashboard is deliberately single-face now. The digit
+# alignment DM Mono used to buy comes from font-variant-numeric: tabular-nums,
+# which the numeric rules already carry.
+# If the host cannot reach fonts.googleapis.com the stack falls back to system
+# faces: label typography changes, layout does not.
 _FONT_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 """
 
 # Tokens + box model. Needed in the page stylesheet for the chrome AND inside the
@@ -131,14 +133,14 @@ _CHIP_CSS = """
   font-size: 10px; font-weight: 700;
   padding: 2px 8px; border-radius: 10px;
   background: var(--accent); color: #fff;
-  letter-spacing: .5px; white-space: nowrap; display: inline-block;
+  letter-spacing: 0; white-space: nowrap; display: inline-block;
 }
 .fct .pill-live { background: #e8f5ec; color: #2a6e3f; }
 .fct .pill-none { background: #fdecea; color: #9c2a22; }
 
 .fct .no-data {
   text-align: center; padding: 40px;
-  color: var(--muted); font-family: 'DM Mono', monospace; font-size: 13px;
+  color: var(--muted); font-size: 13px;
   white-space: normal;
 }
 """
@@ -177,50 +179,49 @@ _CHROME_CSS = """
   margin: 0 6px; align-self: center; border-radius: 2px;
 }
 .fct .header-row-label {
-  font-family: 'DM Mono', monospace;
-  font-size: 10px; letter-spacing: 1px;
+  font-size: 10px; letter-spacing: 0;
   color: var(--on-navy); white-space: nowrap;
 }
+/* The title and the "As of / Data pulled" line share a BASELINE - the only
+   alignment that reads as correct between a 24px title and a 10px label. They
+   are grouped so .hdr-meta, which is a two-line stack, can stay box-centered in
+   the row on its own: one align-items on .header-row cannot serve both. */
+.fct .hdr-title-group { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; }
 .fct .logo {
-  font-size: 24px; font-weight: 700; letter-spacing: 1px;
-  color: #ffffff; line-height: 1;
+  font-size: 24px; font-weight: 500; letter-spacing: 0;
+  color: #ffffff; line-height: 1.1;
 }
-.fct .logo span { color: var(--on-navy); font-size: 15px; font-weight: 600; }
+/* Only SIZE separates the qualifier from the title: same face, same weight,
+   same white. */
+.fct .logo span { font-size: 15px; }
 
-.fct .dataset-selector-wrap { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fct .dataset-selector-wrap { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .fct .dataset-label {
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  color: var(--on-navy); letter-spacing: .5px; white-space: nowrap;
+  font-size: 10px; font-weight: 700;
+  color: var(--on-navy); letter-spacing: 0; white-space: nowrap;
 }
 .fct .dataset-value {
   color: #fff; font-size: 13px; font-weight: 700;
-  font-family: 'DM Mono', monospace;
 }
 .fct .dataset-value.dim { color: rgba(255,255,255,.85); font-size: 12px; font-weight: 400; }
 .fct .dataset-sep { color: rgba(255,255,255,.4); margin: 0 6px; }
 
 .fct .hdr-meta { margin-left: auto; display: flex; gap: 26px; row-gap: 10px; flex-wrap: wrap; }
 .fct .hdr-meta > div {
-  font-size: 10px; font-weight: 700; letter-spacing: .5px;
-  color: var(--on-navy); text-transform: uppercase;
+  font-size: 10px; font-weight: 700; letter-spacing: 0;
+  color: var(--on-navy);
 }
 .fct .hdr-meta b {
   display: block; margin-top: 2px; color: #fff; font-size: 14px;
   font-variant-numeric: tabular-nums; letter-spacing: 0;
 }
-/* DATA PULLED carries a tooltip with the absolute timestamp; the dotted
-   underline advertises that there is something to hover. width:fit-content is
-   what makes the rule hug the text instead of spanning the whole column. */
-.fct .hdr-meta .fresh { cursor: help; }
-.fct .hdr-meta .fresh b { width: fit-content; border-bottom: 1px dotted #4d6a91; }
 
 /* ── SECTION LABELS ─────────────────────────────────────────────────────────
    The template declares .section-label but renders .trend-title instead;
    revived here — it is the same ::after hairline device. Values match the relic
    dashboard's .sec-title so the two read alike once merged. */
 .fct .section-label {
-  font-size: 12px; font-weight: 700; letter-spacing: 1px;
-  text-transform: uppercase;
+  font-size: 12px; font-weight: 700; letter-spacing: 0;
   color: var(--muted);
   margin: 8px 0 12px;
   display: flex; align-items: center; gap: 10px;
@@ -231,15 +232,14 @@ _CHROME_CSS = """
 .fct .legend { display: flex; gap: 20px; margin-bottom: 14px; flex-wrap: wrap; }
 .fct .legend-item {
   display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--muted); font-family: 'DM Mono', monospace;
+  font-size: 12px; color: var(--muted);
 }
 .fct .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
 /* ── CONTEXT BAR ────────────────────────────────────────────────────────────── */
 .fct .context-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; flex-wrap: wrap; }
 .fct .context-status, .fct .context-view {
-  font-family: 'DM Mono', monospace;
-  font-size: 12px; font-weight: 700; letter-spacing: .8px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0;
   padding: 4px 11px; border-radius: 5px; color: #fff;
 }
 .fct .context-status { background: var(--gold); }
@@ -251,8 +251,7 @@ _CHROME_CSS = """
 
 /* .filter-badge - shown in the filter row whenever a filter is narrowing the view. */
 .fct .filter-badge {
-  font-family: 'DM Mono', monospace;
-  font-size: 10px; letter-spacing: 1px;
+  font-size: 10px; letter-spacing: 0;
   color: var(--accent); border: 1px solid var(--accent);
   border-radius: 4px; padding: 3px 8px;
   display: inline-block; white-space: nowrap;
@@ -276,8 +275,8 @@ _CHROME_CSS = """
 .fct .stat-card-market { border-top-color: var(--accent2); }
 .fct .stat-card-margin { border-top-color: var(--band-dealernet); }
 .fct .stat-card-label {
-  font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .7px; color: var(--muted); margin-bottom: 6px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0; color: var(--muted); margin-bottom: 6px;
 }
 .fct .stat-card-value {
   font-size: 26px; font-weight: 700; color: var(--text);
@@ -291,8 +290,9 @@ _CHROME_CSS = """
 
 /* ── CHARTS ───────────────────────────────────────────────────────────────────
    The relic dashboard renders its charts through Altair, so their text picks up
-   the theme font (Inter) rather than DM Mono, and they sit on the same surface
-   treatment as its .table-wrap: radius 8px plus a soft shadow, no border. Both
+   the theme font (Inter), which is now the dashboard's only face, and they sit on
+   the same surface treatment as its .table-wrap: radius 8px plus a soft shadow,
+   no border. Both
    are mirrored here so the hand-built donuts read as the same family of chart.
    The aging ramp colours are deliberately NOT touched — that sequential encoding
    is shared with the table's Aging Bucket chips. */
@@ -306,8 +306,8 @@ _CHROME_CSS = """
 }
 .fct .chart-wrap svg { display: block; }
 .fct .chart-title {
-  font-size: 12px; font-weight: 700; letter-spacing: 1px; color: var(--muted);
-  text-transform: uppercase; margin-bottom: 14px;
+  font-size: 12px; font-weight: 700; letter-spacing: 0; color: var(--muted);
+  margin-bottom: 14px;
 }
 .fct .chart-title b { color: var(--text); font-weight: 700; }
 
@@ -362,13 +362,12 @@ _CHROME_CSS = """
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
 }
 .fct .detail-panel-title {
-  font-size: 16px; font-weight: 700; color: #fff; letter-spacing: .5px;
+  font-size: 16px; font-weight: 700; color: #fff; letter-spacing: 0;
 }
 .fct .detail-count-badge {
   background: rgba(255,255,255,.12);
   border: 1px solid rgba(255,255,255,.2);
   color: #c5d4ea;
-  font-family: 'DM Mono', monospace;
   font-size: 11px; padding: 2px 8px; border-radius: 20px;
 }
 .fct .detail-grid {
@@ -377,8 +376,8 @@ _CHROME_CSS = """
 }
 .fct .detail-cell { background: var(--surface); padding: 12px 16px; }
 .fct .detail-cell .dc-lbl {
-  font-size: 9px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .6px; color: var(--muted); margin-bottom: 4px;
+  font-size: 9px; font-weight: 700;
+  letter-spacing: 0; color: var(--muted); margin-bottom: 4px;
 }
 .fct .detail-cell .dc-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
 """
@@ -401,8 +400,7 @@ _TABLE_CSS = """
   text-align: right;
   font-size: 9px;
   font-weight: 700;
-  letter-spacing: .3px;
-  text-transform: uppercase;
+  letter-spacing: 0;
   color: #ffffff;
   white-space: nowrap;
   border-bottom: 1px solid rgba(255,255,255,.08);
@@ -418,8 +416,7 @@ _TABLE_CSS = """
   color: #ffffff;
   font-size: 9px;
   font-weight: 800;
-  letter-spacing: .3px;
-  text-transform: uppercase;
+  letter-spacing: 0;
   padding: 3px 5px;
   text-align: center;
   border-bottom: 1px solid rgba(255,255,255,.06);
@@ -463,7 +460,7 @@ _TABLE_CSS = """
 .fct td.td-pos   { color: var(--pos); }
 .fct td.td-neg   { color: var(--neg); }
 .fct td.td-null  { color: #b8c2d4; }
-.fct td.td-code  { font-family: 'DM Mono', monospace; font-size: 10px; }
+.fct td.td-code  { font-size: 11px; }
 
 .fct tbody tr[data-key] { cursor: pointer; }
 .fct tbody tr:hover { background: var(--surface2); }
@@ -540,8 +537,7 @@ _WIDGET_CSS = """
   border-radius: 7px; overflow: hidden; gap: 0; width: fit-content;
 }
 .st-key-mapping div[data-testid="stButtonGroup"] button {
-  font-family: 'DM Mono', monospace;
-  font-size: 11px; font-weight: 600; letter-spacing: .5px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0;
   border: none; border-right: 1px solid rgba(255,255,255,.28); border-radius: 0;
   background: transparent; color: var(--on-navy-bright);
   padding: 4px 14px; min-height: 0;
@@ -562,7 +558,7 @@ _WIDGET_CSS = """
 
 /* Refresh is a port addition, not in the template; give it the on-navy ghost look. */
 .st-key-refresh button {
-  font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .5px;
+  font-size: 11px; letter-spacing: 0;
   background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.28);
   color: var(--on-navy-bright); border-radius: 6px; padding: 4px 12px; min-height: 0;
 }
@@ -570,19 +566,25 @@ _WIDGET_CSS = """
   background: rgba(255,255,255,.16); color: #fff; border-color: rgba(255,255,255,.5);
 }
 
-/* FILTER BAR - .search-box and five .filter-select, all DM Mono on white. */
+/* FILTER BAR - .search-box and five .filter-select, on white. The face comes
+   from the Inter theme font: these containers are NOT .fct descendants, so they
+   inherit from Streamlit's root rather than from the chrome's own rules. */
 .st-key-chrome_flt { margin-bottom: 20px; }
 .st-key-chrome_flt div[data-testid="stHorizontalBlock"] { align-items: center; }
 div[class*="st-key-f_"] div[data-testid="stSelectbox"] { min-width: 120px; }
-div[class*="st-key-f_"] input,
-div[class*="st-key-f_"] div[data-testid="stSelectbox"] div[value] {
-  font-family: 'DM Mono', monospace; font-size: 12px;
-}
-.st-key-f_search input { font-size: 13px; padding: 8px 14px; }
+div[class*="st-key-f_"] input { font-size: 12px; }
+/* The open popover renders OUTSIDE the widget container, so it needs its own
+   rule or the option list shows at the theme's 14px while the closed value
+   reads 12px. */
+div[data-testid="stSelectboxVirtualDropdown"] li { font-size: 12px; }
+/* Must out-specify the rule above, which is (0,1,2) - hence the attribute
+   selector rather than the bare .st-key-f_search class, which lost at (0,1,1)
+   and silently left the search box at 12px. */
+div[class*="st-key-f_search"] input { font-size: 13px; padding: 8px 14px; }
 
 /* .sort-btn / .export-btn - ghost buttons on the page ground. */
 .st-key-clear button, .st-key-export button {
-  font-family: 'DM Mono', monospace; font-size: 11px; letter-spacing: .5px;
+  font-size: 11px; letter-spacing: 0;
   background: none; border: 1px solid var(--border); color: var(--muted);
   border-radius: 6px; padding: 5px 12px; min-height: 0;
 }
@@ -596,7 +598,7 @@ div[class*="st-key-sort_"] div[data-testid="stButtonGroup"] {
   border-radius: 6px; overflow: hidden; gap: 0; width: fit-content;
 }
 div[class*="st-key-sort_"] div[data-testid="stButtonGroup"] button {
-  font-family: 'DM Mono', monospace; font-size: 11px;
+  font-size: 11px;
   border: none; border-right: 1px solid var(--border); border-radius: 0;
   background: var(--surface); color: var(--muted); padding: 5px 12px; min-height: 0;
 }
@@ -605,7 +607,7 @@ div[class*="st-key-sort_"] div[data-testid="stButtonGroup"] button[data-selected
   background: var(--surface2); color: var(--text); font-weight: 600;
 }
 div[class*="st-key-sort_"] input, .st-key-rows input {
-  font-family: 'DM Mono', monospace; font-size: 12px;
+  font-size: 12px;
 }
 """
 
@@ -731,26 +733,27 @@ def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
 
     The template shows "AS OF <month>", but ``VAULT_INVENTORY_V`` is an SCD2 view
     with no as-of dimension and the query pins the open record — there is no
-    period to name. So the field reads LIVE SNAPSHOT and is paired with a real
-    DATA PULLED stamp, which is the question a reader actually has.
+    period to name. So the field reads Live Snapshot and is paired with a real
+    Data Pulled stamp, which is the question a reader actually has.
     """
     fresh = ""
     if pulled_at is not None:
         rel, abs_txt = freshness_label(pulled_at)
         fresh = ('<span class="dataset-sep">&middot;</span>'
-                 '<label class="dataset-label">DATA PULLED</label>'
+                 '<label class="dataset-label">Data Pulled</label>'
                  f'<span class="dataset-value dim" title="Last query against Snowflake: '
                  f'{escape(abs_txt)}">{escape(rel)}</span>')
     return (
         '<div class="hdr">'
         '<div class="header-row header-row-top">'
-        '<div class="logo">Vault Inventory <span>/ Dealernet</span></div>'
+        '<div class="hdr-title-group">'
+        '<div class="logo">Vault Inventory / Dealernet</div>'
         '<div class="dataset-selector-wrap">'
-        '<label class="dataset-label">AS OF</label>'
+        '<label class="dataset-label">As Of</label>'
         '<span class="dataset-value" title="VAULT_INVENTORY_V is an SCD2 view with no '
-        'as-of dimension; the query pins the currently-open record.">LIVE SNAPSHOT</span>'
+        'as-of dimension; the query pins the currently-open record.">Live Snapshot</span>'
         f'{fresh}'
-        "</div>"
+        "</div></div>"
         '<div class="hdr-meta">'
         f'<div>SKUs<b>{tx.fmtq(meta["skus"])}</b></div>'
         f'<div>Brands<b>{tx.fmtq(meta["brands"])}</b></div>'
@@ -761,7 +764,7 @@ def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
 
 def mapping_label_html() -> str:
     """The MAPPING micro-label, left of the native toggle in the navy strip."""
-    return '<span class="header-row-label">MAPPING</span>'
+    return '<span class="header-row-label">Mapping</span>'
 
 
 def mapping_counts_html(meta: dict) -> str:
@@ -774,15 +777,15 @@ def mapping_counts_html(meta: dict) -> str:
     return (
         '<div class="mapping-counts">'
         '<div class="hdr-vdiv"></div>'
-        f'<span class="header-row-label">{tx.fmtq(meta["mapped"])} MAPPED '
-        f'&middot; {tx.fmtq(meta["no_price"])} NO PRICE</span>'
+        f'<span class="header-row-label">{tx.fmtq(meta["mapped"])} Mapped '
+        f'&middot; {tx.fmtq(meta["no_price"])} No Price</span>'
         "</div>"
     )
 
 
 def filter_badge_html() -> str:
     """The template's FILTERED pill, shown only while a filter is narrowing."""
-    return '<span class="filter-badge">FILTERED</span>' 
+    return '<span class="filter-badge">Filtered</span>' 
 
 
 def context_bar_html(mapping: str, view_label: str, filtered: bool) -> str:
@@ -790,7 +793,7 @@ def context_bar_html(mapping: str, view_label: str, filtered: bool) -> str:
     vcls = " view-filtered" if filtered else ""
     return (
         '<div class="context-bar">'
-        f'<span class="context-status{scls}">{tx.MAPPING_LABELS.get(mapping, "ALL MAPPING")}</span>'
+        f'<span class="context-status{scls}">{tx.MAPPING_LABELS.get(mapping, "All Mapping")}</span>'
         '<span class="context-sep">&middot;</span>'
         f'<span class="context-view{vcls}">{escape(view_label)}</span>'
         "</div>"
@@ -1063,55 +1066,55 @@ GROUPS = [
     # The anchor column sits outside every band — black header, pinned, and it
     # carries the cost/margin mini-bar under the product name.
     ("", "", [
-        _col("product_name", "PRODUCT NAME (ORACLE)", "", "text",
+        _col("product_name", "Product Name (Oracle)", "", "text",
              lambda r: escape(str(r["product_name"] or "")) + _mix_bar(r)),
     ]),
-    ("&#9670; IDENTITY", "th-identity", [
-        _col("dealernet_name", "DEALERNET NAME", "td-left", "text", _text_cell("dealernet_name")),
-        _col("box_type", "BOX TYPE", "td-left", "text", _text_cell("box_type")),
-        _col("item_number", "ITEM NUMBER", "td-left td-code", "text", _text_cell("item_number")),
-        _col("brand_bucket", "BRAND BUCKET", "td-left td-muted", "text", _text_cell("brand_bucket")),
+    ("&#9670; Identity", "th-identity", [
+        _col("dealernet_name", "Dealernet Name", "td-left", "text", _text_cell("dealernet_name")),
+        _col("box_type", "Box Type", "td-left", "text", _text_cell("box_type")),
+        _col("item_number", "Item Number", "td-left td-code", "text", _text_cell("item_number")),
+        _col("brand_bucket", "Brand Bucket", "td-left td-muted", "text", _text_cell("brand_bucket")),
     ]),
-    ("&#9670; INVENTORY", "th-inventory", [
-        _col("quantity_cases", "QTY (CASES)", "", "num",
+    ("&#9670; Inventory", "th-inventory", [
+        _col("quantity_cases", "Qty (Cases)", "", "num",
              _num_cell("quantity_cases", tx.fmtq), _sum_total("quantity_cases", tx.fmtq)),
-        _col("street_date", "STREET DATE", "td-muted", "num", _date_cell("street_date")),
-        _col("aging_bucket", "AGING BUCKET", "td-left", "text",
+        _col("street_date", "Street Date", "td-muted", "num", _date_cell("street_date")),
+        _col("aging_bucket", "Aging Bucket", "td-left", "text",
              lambda r: _aging_chip(r["aging_bucket"])),
-        _col("brand", "BRAND", "td-left td-muted", "text", _text_cell("brand")),
-        _col("inventory_value", "INVENTORY VALUE", "td-total", "num",
+        _col("brand", "Brand", "td-left td-muted", "text", _text_cell("brand")),
+        _col("inventory_value", "Inventory Value", "td-total", "num",
              _num_cell("inventory_value", tx.fmt), _sum_total("inventory_value", tx.fmt)),
     ]),
-    ("&#9670; PACK CONFIG", "th-pack", [
-        _col("boxes_per_case", "BOXES / CASE", "td-muted", "num", _num_cell("boxes_per_case", tx.fmt_int)),
-        _col("packs_per_box", "PACKS / BOX", "td-muted", "num", _num_cell("packs_per_box", tx.fmt_int)),
-        _col("cards_per_pack", "CARDS / PACK", "td-muted", "num", _num_cell("cards_per_pack", tx.fmt_int)),
+    ("&#9670; Pack Config", "th-pack", [
+        _col("boxes_per_case", "Boxes / Case", "td-muted", "num", _num_cell("boxes_per_case", tx.fmt_int)),
+        _col("packs_per_box", "Packs / Box", "td-muted", "num", _num_cell("packs_per_box", tx.fmt_int)),
+        _col("cards_per_pack", "Cards / Pack", "td-muted", "num", _num_cell("cards_per_pack", tx.fmt_int)),
     ]),
-    ("&#9670; PRICING", "th-pricing", [
-        _col("unit_cost_per_case", "UNIT COST / CASE", "", "num",
+    ("&#9670; Pricing", "th-pricing", [
+        _col("unit_cost_per_case", "Unit Cost / Case", "", "num",
              _num_cell("unit_cost_per_case", tx.fmt)),
-        _col("dealernet_price_per_case", "DN PRICE / CASE", "", "num",
+        _col("dealernet_price_per_case", "DN Price / Case", "", "num",
              _num_cell("dealernet_price_per_case", tx.fmt)),
-        _col("wholesale_value", "WHOLESALE VALUE", "", "num",
+        _col("wholesale_value", "Wholesale Value", "", "num",
              _num_cell("wholesale_value", tx.fmt), _sum_total("wholesale_value", tx.fmt)),
     ]),
-    ("&#9670; MARGIN", "th-margin", [
+    ("&#9670; Margin", "th-margin", [
         # The footer % is Σprofit / Σwholesale from transforms.table_totals, not an
         # average of the per-row percentages.
-        _col("margin_pct", "MARGIN %", "", "num",
+        _col("margin_pct", "Margin %", "", "num",
              lambda r: _signed(r["margin_pct"], tx.fmt_pct), _sum_total("margin_pct", tx.fmt_pct)),
-        _col("total_potential_profit", "POTENTIAL PROFIT", "", "num",
+        _col("total_potential_profit", "Potential Profit", "", "num",
              lambda r: _signed(r["total_potential_profit"], tx.fmt),
              _sum_total("total_potential_profit", tx.fmt)),
-        _col("margin_dollars_per_case", "MARGIN $ / CASE", "", "num",
+        _col("margin_dollars_per_case", "Margin $ / Case", "", "num",
              lambda r: _signed(r["margin_dollars_per_case"], tx.fmt)),
     ]),
-    ("&#9670; DEALERNET MATCH", "th-dealernet", [
-        _col("price_source", "PRICE SOURCE", "td-left", "text", _price_source_pill),
-        _col("dn_listing_count", "DN LISTINGS", "td-muted", "num",
+    ("&#9670; Dealernet Match", "th-dealernet", [
+        _col("price_source", "Price Source", "td-left", "text", _price_source_pill),
+        _col("dn_listing_count", "DN Listings", "td-muted", "num",
              lambda r: tx.fmtq(r["dn_listing_count"]) if r["dn_listing_count"] else _null_cell(),
              _sum_total("dn_listing_count", tx.fmtq)),
-        _col("dn_latest_date", "DN LATEST", "td-muted", "num", _date_cell("dn_latest_date")),
+        _col("dn_latest_date", "DN Latest", "td-muted", "num", _date_cell("dn_latest_date")),
     ]),
 ]
 
