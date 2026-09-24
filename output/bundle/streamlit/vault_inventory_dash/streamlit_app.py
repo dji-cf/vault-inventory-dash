@@ -213,6 +213,16 @@ style.render(style.hbars_card_html(
     "Inventory by brand —", "Inventory Value",
     tx.brand_composition(flt, "inventory_value"), tx.fmt_abbr), container=b2)
 
+# ── market value by brand ────────────────────────────────────────────────────
+style.render(style.section_label_html("Market Value by Brand"))
+m1, m2 = st.columns(2)
+style.render(style.hbars_card_html(
+    "Market value by brand —", "Current Market Value",
+    tx.brand_composition(flt, "market_value"), tx.fmt_abbr), container=m1)
+style.render(style.hbars_card_html(
+    "Market value by brand —", "Unrealized Gross Margin",
+    tx.brand_margin_composition(flt), tx.fmt_abbr), container=m2)
+
 # ── product detail ───────────────────────────────────────────────────────────
 style.render(style.section_label_html("Product Detail"))
 

@@ -429,6 +429,17 @@ def brand_composition(df: pd.DataFrame, value_col: str) -> list[dict]:
     return rows
 
 
+def brand_margin_composition(df: pd.DataFrame) -> list[dict]:
+    """Rows for the Unrealized Gross Margin bar chart, largest first.
+
+    Same formula as ``stat_cards()["margin"]`` — market value of priced SKUs
+    minus the valuation of ALL SKUs (unpriced rows count as 0 market value) —
+    so the bars sum to the KPI card. Brands that net negative are kept.
+    """
+    margin = df["market_value"].fillna(0.0) - df["inventory_value"]
+    return brand_composition(df.assign(_margin=margin), "_margin")
+
+
 # Columns whose footer total is a plain sum. Ratio columns are absent by design.
 _SUMMABLE = ("quantity_cases", "inventory_value", "wholesale_value",
              "total_potential_profit", "dn_listing_count")
