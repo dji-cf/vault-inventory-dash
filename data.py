@@ -122,10 +122,15 @@ def _connection():
 # TypeErrors). Coerce every one to float up front.
 _NUMERIC_COLS = (
     "quantity_cases",
+    "display_boxes",
+    "loose_packs",
+    "unconverted_rows",
     "unit_cost_per_case",
     "inventory_value",
     "dealernet_price_per_case",
+    "dealernet_price_per_box",
     "dn_listing_count",
+    "dn_box_listing_count",
     "year_priority",
     "market_value",
     "wholesale_value",
@@ -159,7 +164,7 @@ _TEXT_COLS = (
 
 @st.cache_data(ttl=_TTL, show_spinner="Loading vault inventory…")
 def load_inventory() -> tuple[pd.DataFrame, datetime]:
-    """The full SKU-grain snapshot, one row per ``item_key``.
+    """The SKU-grain snapshot, one row per ``item_key`` with positive stock.
 
     Returns ``(df, pulled_at)``. ``pulled_at`` is the UTC instant the SELECT
     actually ran, captured INSIDE the cached body so a cache HIT keeps the
@@ -179,6 +184,11 @@ def load_inventory() -> tuple[pd.DataFrame, datetime]:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
 
+    # The table shows the 80% price so Qty x price ties to Wholesale Value; the
+    # detail panel shows the full dealernet_price_per_case beside it (plan 06).
+    # Created after the _NUMERIC_COLS loop, so it needs no entry there.
+    df["adj_dn_price_per_case"] = df["dealernet_price_per_case"] * tx.WHOLESALE_FACTOR
+
     # Additive measures: a NULL would poison sums and the footer totals. The
     # ratio columns (margin_pct, markup_multiple) are deliberately NOT filled —
     # NULL there means "unpriced", which must render as an em dash, not 0%.
@@ -189,12 +199,32 @@ def load_inventory() -> tuple[pd.DataFrame, datetime]:
         if c in df.columns:
             df[c] = df[c].fillna(0.0)
 
+    # Only SKUs with stock on hand. The SQL keeps every -CSE / -DB row regardless
+    # of quantity so its SKU count matches Sigma's; the app no longer ties to that
+    # count. Dropped here, inside the cache and after the fill above (a NULL
+    # quantity counts as zero), so the filter options, header, tiles, charts,
+    # table and export all see the same trimmed snapshot.
+    df = df[df["quantity_cases"] > 0]
+
     for c in _TEXT_COLS:
         if c in df.columns:
             df[c] = df[c].astype("object").where(df[c].notna(), None)
 
     df["street_date"] = pd.to_datetime(df["street_date"], errors="coerce")
-    df["dn_latest_date"] = pd.to_datetime(df["dn_latest_date"], errors="coerce")
+    # DEALERNET_ORDERS.TRANSACTION_DATE is TIMESTAMP_LTZ stored at UTC midnight
+    # (all 94,768 case orders). The connector converts it to the session zone, so
+    # a Sep 8 sale arrives as Sep 7 20:00 -04:00. Convert back to UTC before
+    # dropping the time, or every DN date reads one day early.
+    lt = pd.to_datetime(df["dn_latest_date"], errors="coerce")
+    if lt.dt.tz is not None:
+        lt = lt.dt.tz_convert("UTC").dt.tz_localize(None)
+    df["dn_latest_date"] = lt.dt.normalize()
+
+    # Both columns are created after the _NUMERIC_COLS / _TEXT_COLS loops, so
+    # neither needs an entry there.
+    df["dn_age_days"] = tx.price_age_days(df["dn_latest_date"], pulled_at)
+    df["price_status"] = tx.price_status(df["dealernet_price_per_case"].notna(),
+                                         df["dn_age_days"])
 
     # street_date_year drives a filter dropdown, so it must be a clean nullable
     # integer — a float would render as "2024.0".
@@ -215,6 +245,12 @@ def load_inventory() -> tuple[pd.DataFrame, datetime]:
     # _TEXT_COLS, having been copied after that loop already ran.
     df["brand_oracle"] = df["brand"]
     df["brand"] = tx.canonical_brand(df["brand"])
+    # Same reasoning as brand: fold inside the cache so the filter options, the
+    # charts, the table and the export all agree. brand_bucket_oracle keeps the
+    # SQL's (Sigma's) bucket and needs no _TEXT_COLS entry, having been copied
+    # after that loop ran.
+    df["brand_bucket_oracle"] = df["brand_bucket"]
+    df["brand_bucket"] = tx.canonical_bucket(df["brand_bucket"], df["brand"])
 
     # The SQL's ORDER BY sorts on the RAW brand, so merged spellings arrive
     # interleaved. Re-sort on the canonical value to restore the intended

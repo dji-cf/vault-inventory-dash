@@ -6,3 +6,4 @@ build/
 dist/
 # Local-run credentials only — never commit.
 .streamlit/secrets.toml
+plans/

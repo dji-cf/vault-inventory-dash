@@ -6,20 +6,24 @@ rather than rewrite it. Two structural changes were unavoidable:
 
 **Rescoping.** The template styles bare elements (``body``, ``header``, ``table``,
 ``td``, ``thead th``). Every selector here is scoped under a ``.fct`` wrapper so
-it cannot collide with Streamlit's own DOM, and ``:root`` variables move onto
-``.fct``. ``position: sticky`` on the header is dropped — Streamlit owns the
+it cannot collide with Streamlit's own DOM. The ``:root`` variables stay on
+``:root`` and are repeated on ``.fct`` (the table's shadow root has no
+``:root``). ``position: sticky`` on the header is dropped — Streamlit owns the
 scroll container — so the header renders as a card.
 
 **Splitting.** Page styles cannot pierce a Custom Component's shadow root, so the
-product table's CSS ships separately as ``TABLE_CSS`` (injected into the
-component) while the page chrome uses ``CSS``. Rules needed on both sides
-(chips, status pills, tokens) live in the shared blocks and are concatenated into
-each.
+product table's CSS ships separately as ``TABLE_CSS``, the four charts' as
+``CHART_CSS`` and the row drill-down panel's as ``DETAIL_CSS`` (each injected
+into its component), while the page chrome uses ``CSS``. Rules needed on more
+than one side (chips, status pills, tokens) live in the shared blocks and are
+concatenated into each.
 
 The donut and horizontal-bar charts are built here as inline SVG/CSS rather than
 handed to Altair: the template's donut pairs an arc ring with an itemised
 value+percentage legend beside it, and its bars are a label/track/value grid.
 Reproducing those in Altair would approximate the design instead of porting it.
+They are mounted through ``interactive.chart``, which makes every ``data-pick``
+element a click-to-filter target.
 """
 from __future__ import annotations
 
@@ -70,9 +74,15 @@ _FONT_CSS = """
 
 # Tokens + box model. Needed in the page stylesheet for the chrome AND inside the
 # table component, because page styles can't pierce the shadow root.
+# The custom properties sit on :root AS WELL AS .fct. The st-key-* rules in
+# _WIDGET_CSS dress native widgets and containers that are not .fct descendants,
+# so a .fct-only declaration left every var() there resolving to nothing (a
+# transparent header card, theme-coloured button text). Inside the table's shadow
+# root :root matches nothing and .fct still does. color / font stay on .fct only:
+# on :root they would change Streamlit's own base font.
 _TOKENS_CSS = """
 .fct, .fct * { box-sizing: border-box; margin: 0; padding: 0; }
-.fct {
+:root, .fct {
   --bg: #f0f2f5;
   --surface: #ffffff;
   --surface2: #f8f9fc;
@@ -104,19 +114,19 @@ _TOKENS_CSS = """
 
   --band-identity:  #1f3d6a;
   --band-inventory: #166534;
-  --band-pack:      #57534e;
   --band-pricing:   #155e63;
   --band-margin:    #8a6314;
   --band-dealernet: #5b3a8e;
-
+}
+.fct {
   color: var(--text);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
   font-size: 14px;
 }
 """
 
-# Chips and status pills appear in the table (shadow root) AND in the drill-down
-# panel (page), so they are shared rather than duplicated.
+# Chips and status pills appear in the table AND in the drill-down panel, two
+# separate shadow roots, so they are shared rather than duplicated.
 _CHIP_CSS = """
 .fct .chip {
   font-size: 10px; font-weight: 700;
@@ -135,8 +145,9 @@ _CHIP_CSS = """
   background: var(--accent); color: #fff;
   letter-spacing: 0; white-space: nowrap; display: inline-block;
 }
-.fct .pill-live { background: #e8f5ec; color: #2a6e3f; }
-.fct .pill-none { background: #fdecea; color: #9c2a22; }
+.fct .pill-live  { background: #e8f5ec; color: #2a6e3f; }
+.fct .pill-stale { background: #fdf3e1; color: #8a5a12; }
+.fct .pill-none  { background: #fdecea; color: #9c2a22; }
 
 .fct .no-data {
   text-align: center; padding: 40px;
@@ -149,7 +160,10 @@ _CHROME_CSS = """
 /* ── HEADER ──────────────────────────────────────────────────────────────────
    The template's header element is sticky and full-bleed. Streamlit owns the
    scroll container, so it becomes a rounded card instead — same chrome, no
-   sticking.
+   sticking. The card itself is the keyed horizontal container
+   .st-key-chrome_hdr (see _WIDGET_CSS), because the Refresh button beside Data
+   Pulled is a native widget and cannot live inside an HTML string. The rules
+   here style the two HTML fragments it holds: the title group and the facts.
 
    NOTE: not one LESS-THAN character may appear anywhere in this stylesheet, not
    even inside a comment. st.html sanitizes with DOMPurify, whose SAFE_FOR_XML
@@ -159,33 +173,11 @@ _CHROME_CSS = """
    "header" written in angle brackets here silently deletes all 11 KB of page CSS
    and the whole dashboard renders as naked HTML. _checked() below is what makes
    that failure loud instead of silent. */
-.fct .hdr {
-  background: var(--navy);
-  /* Only the TOP row lives in this card now. The MAPPING row below it is a native
-     segmented control, which cannot sit inside an HTML string, so it becomes a
-     separate navy strip: the card takes the top radius and zero bottom margin, the
-     strip takes the bottom radius, and the two read as one header. */
-  border-radius: 10px 10px 0 0;
-  padding: 0 22px;
-  margin-bottom: 0;
-  box-shadow: 0 2px 8px rgba(0,0,0,.25);
-  display: flex; flex-direction: column;
-}
-.fct .header-row { display: flex; align-items: center; gap: 20px; width: 100%; flex-wrap: wrap; }
-.fct .header-row-top { padding: 12px 0; }
-.fct .mapping-counts { display: flex; align-items: center; gap: 8px; }
-.fct .hdr-vdiv {
-  width: 2px; height: 20px; background: rgba(255,255,255,.5);
-  margin: 0 6px; align-self: center; border-radius: 2px;
-}
-.fct .header-row-label {
-  font-size: 10px; letter-spacing: 0;
-  color: var(--on-navy); white-space: nowrap;
-}
 /* The title and the "As of / Data pulled" line share a BASELINE - the only
    alignment that reads as correct between a 24px title and a 10px label. They
-   are grouped so .hdr-meta, which is a two-line stack, can stay box-centered in
-   the row on its own: one align-items on .header-row cannot serve both. */
+   are ONE fragment so .hdr-meta, which is a two-line stack, can stay
+   box-centered in the header row on its own: the container's single
+   vertical_alignment cannot serve both. */
 .fct .hdr-title-group { display: flex; align-items: baseline; gap: 20px; flex-wrap: wrap; }
 .fct .logo {
   font-size: 24px; font-weight: 500; letter-spacing: 0;
@@ -206,7 +198,8 @@ _CHROME_CSS = """
 .fct .dataset-value.dim { color: rgba(255,255,255,.85); font-size: 12px; font-weight: 400; }
 .fct .dataset-sep { color: rgba(255,255,255,.4); margin: 0 6px; }
 
-.fct .hdr-meta { margin-left: auto; display: flex; gap: 26px; row-gap: 10px; flex-wrap: wrap; }
+/* No margin-left:auto - the header's stretch spacer pushes the facts right. */
+.fct .hdr-meta { display: flex; gap: 26px; row-gap: 10px; flex-wrap: wrap; }
 .fct .hdr-meta > div {
   font-size: 10px; font-weight: 700; letter-spacing: 0;
   color: var(--on-navy);
@@ -235,19 +228,6 @@ _CHROME_CSS = """
   font-size: 12px; color: var(--muted);
 }
 .fct .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
-
-/* ── CONTEXT BAR ────────────────────────────────────────────────────────────── */
-.fct .context-bar { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; flex-wrap: wrap; }
-.fct .context-status, .fct .context-view {
-  font-size: 12px; font-weight: 700; letter-spacing: 0;
-  padding: 4px 11px; border-radius: 5px; color: #fff;
-}
-.fct .context-status { background: var(--gold); }
-.fct .context-status.status-S { background: var(--accent2); }
-.fct .context-status.status-O { background: var(--neg); }
-.fct .context-sep { color: var(--muted); }
-.fct .context-view { background: #5a7fbf; }
-.fct .context-view.view-filtered { background: #7b52ab; }
 
 /* .filter-badge - shown in the filter row whenever a filter is narrowing the view. */
 .fct .filter-badge {
@@ -287,7 +267,131 @@ _CHROME_CSS = """
   font-size: 11px; color: var(--muted); margin-top: 3px;
   font-variant-numeric: tabular-nums;
 }
+/* The Wholesale Value card's "N SKUs not priced" note. */
+.fct .stat-card-sub .sub-neg { color: var(--neg); }
+"""
 
+_TABLE_CSS = """
+/* ── TABLE ──────────────────────────────────────────────────────────────────── */
+.fct .table-wrap {
+  background: var(--surface);
+  border-radius: 8px;
+  overflow-x: auto;
+  box-shadow: 0 1px 4px rgba(0,0,0,.08);
+}
+/* min-width:max-content is what lets the 15 columns size to their content and
+   scroll sideways rather than compressing into illegibility. */
+.fct table { width: 100%; min-width: max-content; border-collapse: collapse; table-layout: auto; }
+
+.fct thead th {
+  background: var(--navy);
+  padding: 4px 5px;
+  text-align: right;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #ffffff;
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  cursor: pointer;
+  user-select: none;
+}
+.fct thead th:first-child { text-align: left; background: #000000 !important; color: #fff !important; }
+.fct thead th.sorted { color: var(--gold); }
+.fct thead th .sort-arrow { margin-left: 4px; opacity: .6; }
+/* Headers are the only sort control, so they need a hover state. An underline
+   rather than a background: the band classes and th:first-child set their
+   backgrounds with !important, which a hover background would lose to (or, if
+   forced, would erase the band colour). */
+.fct thead tr:not(.col-group-header) th[data-sort]:hover { box-shadow: inset 0 -2px 0 var(--gold); }
+
+.fct .col-group-header th {
+  background: var(--navy-deep);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0;
+  padding: 3px 5px;
+  text-align: center;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  cursor: default;
+}
+.fct .col-group-header th:first-child { background: #000000 !important; }
+
+/* Band tints repeat on both header rows so each group reads as one vertical
+   stripe. */
+.fct .th-identity  { background: var(--band-identity)  !important; color: #fff !important; border-bottom: none !important; }
+.fct .th-inventory { background: var(--band-inventory) !important; color: #fff !important; border-bottom: none !important; }
+.fct .th-pricing   { background: var(--band-pricing)   !important; color: #fff !important; border-bottom: none !important; }
+.fct .th-margin    { background: var(--band-margin)    !important; color: #fff !important; border-bottom: none !important; }
+
+/* Inventory Value is the authoritative measure — it gets the gold treatment the
+   template reserves for its TOTAL VALUE column. */
+.fct thead th.td-total { background: var(--gold) !important; color: #fff !important; }
+.fct .td-total { font-weight: 700; color: #000000; font-size: 11px; }
+
+.fct td {
+  padding: 4px 5px;
+  text-align: right;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  white-space: nowrap;
+}
+.fct td:first-child {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fct td.td-left  { text-align: left; }
+.fct td.td-muted { color: var(--muted); }
+.fct td.td-pos   { color: var(--pos); }
+.fct td.td-neg   { color: var(--neg); }
+.fct td.td-null  { color: #b8c2d4; }
+.fct td.td-code  { font-size: 11px; }
+
+.fct tbody tr[data-key] { cursor: pointer; }
+.fct tbody tr:hover { background: var(--surface2); }
+.fct tbody tr.selected { background: var(--selected-bg); border-left: 3px solid var(--selected-border); }
+.fct tbody tr.selected td:first-child { padding-left: 13px; }
+
+.fct .tfoot-row { background: var(--surface2); border-top: 2px solid var(--border); }
+.fct .tfoot-row td { font-weight: 700; font-size: 10.5px; }
+
+/* Stale Dealernet price (older than transforms.STALE_DAYS), before the Adj. DN
+   Price digits so right-aligned numbers stay aligned. */
+.fct .stale-dot {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--gold);
+  margin-right: 4px; vertical-align: middle;
+}
+
+/* STICKY: the 15-column table can scroll sideways, so the product name column is
+   pinned — it is what keeps rows identifiable. thead/tfoot stick as blocks,
+   which handles the two-row grouped header with no per-row top offsets.
+   A sticky cell is transparent by default, so the tbody backgrounds below are
+   required or scrolling content shows through; .selected comes last to beat
+   :hover at the same specificity. */
+.fct .table-wrap.scrollable { overflow: auto; }
+.fct .table-wrap.scrollable thead { position: sticky; top: 0; z-index: 3; }
+.fct .table-wrap.scrollable tfoot { position: sticky; bottom: 0; z-index: 3; }
+.fct thead th:first-child { position: sticky; left: 0; z-index: 4; }
+.fct tbody td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.fct tbody tr:hover td:first-child { background: var(--surface2); }
+.fct tbody tr.selected td:first-child { background: var(--selected-bg); }
+.fct tfoot td:first-child { position: sticky; left: 0; z-index: 4; background: var(--surface2); }
+.fct td.no-data:first-child { position: static; max-width: none; }
+"""
+
+# The four charts render inside interactive.chart's shadow root (click-to-filter),
+# so, like the table's, their CSS ships into the component and no page rule can
+# reach them. The section labels and the aging ramp legend above them are page
+# chrome and stay in _CHROME_CSS.
+_CHART_CSS = """
 /* ── CHARTS ───────────────────────────────────────────────────────────────────
    The relic dashboard renders its charts through Altair, so their text picks up
    the theme font (Inter), which is now the dashboard's only face, and they sit on
@@ -310,6 +414,8 @@ _CHROME_CSS = """
   margin-bottom: 14px;
 }
 .fct .chart-title b { color: var(--text); font-weight: 700; }
+/* A basis line under the title (the Markup card's). */
+.fct .chart-sub { font-size: 11px; color: var(--muted); margin: -10px 0 12px; }
 
 /* Donut: SVG on the left, itemised legend on the right. */
 .fct .donut-row { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
@@ -343,6 +449,36 @@ _CHROME_CSS = """
 .fct .hbar-fill { display: block; height: 100%; border-radius: 3px; }
 .fct .hbar-val { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
 
+/* ── CLICK TO FILTER ──────────────────────────────────────────────────────────
+   Anything carrying data-pick sets (or clears) a page filter: the donut arcs,
+   mouse only, and the legend and bar rows, which also take the keyboard
+   (tabindex, role=button, Enter or Space). With a pick active, the picked item is
+   .is-sel and every other item .is-dim. Arcs hit-test on their stroke through the
+   SVG default pointer-events, so no override is set there; the two centre labels
+   opt out so they can never swallow a click. The pickable rows pad out into
+   their own negative margin, so the hover wash has room without moving a pixel
+   of layout. */
+.fct [data-pick] { cursor: pointer; }
+.fct .is-dim { opacity: .35; }
+.fct circle[data-pick]:hover { opacity: .8; }
+.fct circle.is-dim[data-pick]:hover { opacity: .6; }
+.fct .donut-legend-row[data-pick], .fct .hbar-row[data-pick] {
+  border-radius: 4px; padding: 2px 4px; margin: -2px -4px;
+}
+.fct .donut-legend-row[data-pick]:hover, .fct .hbar-row[data-pick]:hover {
+  background: var(--surface2);
+}
+.fct .donut-legend-row[data-pick]:focus-visible, .fct .hbar-row[data-pick]:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.fct .is-sel .dl-label, .fct .is-sel .hbar-label { color: var(--text); font-weight: 700; }
+.fct .donut-center-val, .fct .donut-center-lbl { pointer-events: none; }
+"""
+
+# The row drill-down renders inside interactive.detail's shadow root (so it can
+# scroll itself into view), so its CSS ships into that component too. Nothing on
+# the page renders the panel any more.
+_DETAIL_CSS = """
 /* ── DETAIL PANEL (row drill-down) ─────────────────────────────────────────── */
 @keyframes fctSlideIn {
   from { opacity: 0; transform: translateY(-8px); }
@@ -370,130 +506,34 @@ _CHROME_CSS = """
   color: #c5d4ea;
   font-size: 11px; padding: 2px 8px; border-radius: 20px;
 }
+/* A FIXED column count: 12 tiles fill 4 (or 2) columns evenly, and columns line
+   up as cost over market over margin. auto-fit gave 8 tracks at about 1,400px,
+   and the 4 empty ones showed the old grid background as a grey block. The
+   hairlines are drawn on the cells instead, so an empty track stays white. */
 .fct .detail-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 1px; background: var(--border);
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--surface);
 }
-.fct .detail-cell { background: var(--surface); padding: 12px 16px; }
+.fct .detail-cell {
+  background: var(--surface); padding: 12px 16px;
+  box-shadow: 1px 0 0 var(--border), 0 1px 0 var(--border);
+}
 .fct .detail-cell .dc-lbl {
   font-size: 9px; font-weight: 700;
   letter-spacing: 0; color: var(--muted); margin-bottom: 4px;
 }
 .fct .detail-cell .dc-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
-"""
-
-_TABLE_CSS = """
-/* ── TABLE ──────────────────────────────────────────────────────────────────── */
-.fct .table-wrap {
-  background: var(--surface);
-  border-radius: 8px;
-  overflow-x: auto;
-  box-shadow: 0 1px 4px rgba(0,0,0,.08);
-}
-/* min-width:max-content is what lets the 22 columns size to their content and
-   scroll sideways rather than compressing into illegibility. */
-.fct table { width: 100%; min-width: max-content; border-collapse: collapse; table-layout: auto; }
-
-.fct thead th {
-  background: var(--navy);
-  padding: 4px 5px;
-  text-align: right;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: #ffffff;
-  white-space: nowrap;
-  border-bottom: 1px solid rgba(255,255,255,.08);
-  cursor: pointer;
-  user-select: none;
-}
-.fct thead th:first-child { text-align: left; background: #000000 !important; color: #fff !important; }
-.fct thead th.sorted { color: var(--gold); }
-.fct thead th .sort-arrow { margin-left: 4px; opacity: .6; }
-
-.fct .col-group-header th {
-  background: var(--navy-deep);
-  color: #ffffff;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0;
-  padding: 3px 5px;
-  text-align: center;
-  border-bottom: 1px solid rgba(255,255,255,.06);
-  cursor: default;
-}
-.fct .col-group-header th:first-child { background: #000000 !important; }
-
-/* Band tints repeat on both header rows so each group reads as one vertical
-   stripe. */
-.fct .th-identity  { background: var(--band-identity)  !important; color: #fff !important; border-bottom: none !important; }
-.fct .th-inventory { background: var(--band-inventory) !important; color: #fff !important; border-bottom: none !important; }
-.fct .th-pack      { background: var(--band-pack)      !important; color: #fff !important; border-bottom: none !important; }
-.fct .th-pricing   { background: var(--band-pricing)   !important; color: #fff !important; border-bottom: none !important; }
-.fct .th-margin    { background: var(--band-margin)    !important; color: #fff !important; border-bottom: none !important; }
-.fct .th-dealernet { background: var(--band-dealernet) !important; color: #fff !important; border-bottom: none !important; }
-
-/* Inventory Value is the authoritative measure — it gets the gold treatment the
-   template reserves for its TOTAL VALUE column. */
-.fct thead th.td-total { background: var(--gold) !important; color: #fff !important; }
-.fct .td-total { font-weight: 700; color: #000000; font-size: 11px; }
-
-.fct td {
-  padding: 4px 5px;
-  text-align: right;
-  font-size: 10.5px;
+/* Dealernet names run to about 55 characters, so that tile wraps. */
+.fct .detail-cell .dc-text { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.fct .detail-cell .dc-sub {
+  font-size: 11px; color: var(--muted); margin-top: 3px;
   font-variant-numeric: tabular-nums;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-  white-space: nowrap;
 }
-.fct td:first-child {
-  text-align: left;
-  font-size: 11px;
-  font-weight: 500;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* A stale price's sub-line, in the .pill-stale amber. */
+.fct .detail-cell .dc-sub .sub-stale { color: #8a5a12; }
+@media (max-width: 900px) {
+  .fct .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-.fct td.td-left  { text-align: left; }
-.fct td.td-muted { color: var(--muted); }
-.fct td.td-pos   { color: var(--pos); }
-.fct td.td-neg   { color: var(--neg); }
-.fct td.td-null  { color: #b8c2d4; }
-.fct td.td-code  { font-size: 11px; }
-
-.fct tbody tr[data-key] { cursor: pointer; }
-.fct tbody tr:hover { background: var(--surface2); }
-.fct tbody tr.selected { background: var(--selected-bg); border-left: 3px solid var(--selected-border); }
-.fct tbody tr.selected td:first-child { padding-left: 13px; }
-
-.fct .tfoot-row { background: var(--surface2); border-top: 2px solid var(--border); }
-.fct .tfoot-row td { font-weight: 700; font-size: 10.5px; }
-
-/* Bar-in-cell under the product name: cost / margin split per case. */
-.fct .mix-bar-wrap {
-  display: flex; gap: 2px; height: 4px;
-  border-radius: 3px; overflow: hidden;
-  width: 80px; margin-top: 3px;
-}
-.fct .mix-bar-seg { height: 100%; }
-.fct .sub-label { color: var(--muted); font-size: 10px; font-weight: 400; }
-
-/* STICKY: the 22-column table scrolls sideways, so the product name column is
-   pinned — it is what keeps rows identifiable. thead/tfoot stick as blocks,
-   which handles the two-row grouped header with no per-row top offsets.
-   A sticky cell is transparent by default, so the tbody backgrounds below are
-   required or scrolling content shows through; .selected comes last to beat
-   :hover at the same specificity. */
-.fct .table-wrap.scrollable { overflow: auto; }
-.fct .table-wrap.scrollable thead { position: sticky; top: 0; z-index: 3; }
-.fct .table-wrap.scrollable tfoot { position: sticky; bottom: 0; z-index: 3; }
-.fct thead th:first-child { position: sticky; left: 0; z-index: 4; }
-.fct tbody td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
-.fct tbody tr:hover td:first-child { background: var(--surface2); }
-.fct tbody tr.selected td:first-child { background: var(--selected-bg); }
-.fct tfoot td:first-child { position: sticky; left: 0; z-index: 4; background: var(--surface2); }
-.fct td.no-data:first-child { position: static; max-width: none; }
 """
 
 # Streamlit's own widgets sit between the ported blocks; these few rules stop the
@@ -502,58 +542,29 @@ _STREAMLIT_CSS = """
 /* The template packs its filter bar tightly; Streamlit's default block gap
    would spread the six controls over twice the height. */
 div[data-testid="stHorizontalBlock"] { gap: 10px; }
-/* Both emission wrappers add vertical rhythm the template does not want. The
-   donuts go out through st.markdown rather than st.html (see render() below), and
-   Streamlit gives every markdown container margin-bottom:-1rem to cancel the
-   trailing paragraph margin of its OWN output - .fct content has no trailing
-   paragraph, so that would pull the next block 16px upward. */
-div[data-testid="stHtml"],
-div[data-testid="stMarkdownContainer"]:has(> .fct) { line-height: 0; }
-div[data-testid="stHtml"] > *,
-div[data-testid="stMarkdownContainer"] > .fct { line-height: normal; }
-div[data-testid="stMarkdownContainer"]:has(> .fct) { margin-bottom: 0; }
+/* The st.html wrapper adds vertical rhythm the template does not want: its
+   line box would pad every chrome fragment. Zero it on the wrapper and restore
+   it on the fragment inside. */
+div[data-testid="stHtml"] { line-height: 0; }
+div[data-testid="stHtml"] > * { line-height: normal; }
 """
 
 
-# The template's own widget chrome (.status-toggle, .search-box, .filter-select,
-# .sort-btn, .export-btn) has no markup in this port - native Streamlit controls
-# stand in for it. These rules dress those controls to the template's spec, keyed
-# off the st-key-* classes Streamlit emits for any widget or container with a key.
+# The template's own widget chrome (.search-box, .filter-select, .sort-btn,
+# .export-btn) has no markup in this port - native Streamlit controls stand in for
+# it. These rules dress those controls to the template's spec, keyed off the
+# st-key-* classes Streamlit emits for any widget or container with a key. Those
+# elements are not .fct descendants, so their var() tokens resolve only because
+# _TOKENS_CSS declares them on :root too.
 _WIDGET_CSS = """
-/* MAPPING STRIP - the template's .header-row-bottom, closing the navy header. */
-.st-key-chrome_map {
+/* HEADER - the keyed horizontal container IS the navy card. Children: the
+   title fragment, Refresh, a stretch spacer, the facts fragment. */
+.st-key-chrome_hdr {
   background: var(--navy);
-  border-radius: 0 0 10px 10px;
-  padding: 7px 22px 9px;
+  border-radius: 10px;
+  padding: 12px 22px;
   margin-bottom: 18px;
   box-shadow: 0 2px 8px rgba(0,0,0,.25);
-}
-.st-key-chrome_map div[data-testid="stHorizontalBlock"] { align-items: center; }
-
-/* .status-toggle - one bordered group, hairline-separated segments, pastel actives.
-   The per-segment active colors are positional: ALL / MAPPED / NO PRICE. */
-.st-key-mapping div[data-testid="stButtonGroup"] {
-  border: 1px solid rgba(255,255,255,.28);
-  border-radius: 7px; overflow: hidden; gap: 0; width: fit-content;
-}
-.st-key-mapping div[data-testid="stButtonGroup"] button {
-  font-size: 11px; font-weight: 600; letter-spacing: 0;
-  border: none; border-right: 1px solid rgba(255,255,255,.28); border-radius: 0;
-  background: transparent; color: var(--on-navy-bright);
-  padding: 4px 14px; min-height: 0;
-}
-.st-key-mapping div[data-testid="stButtonGroup"] button:last-child { border-right: none; }
-.st-key-mapping div[data-testid="stButtonGroup"] button:hover {
-  background: rgba(255,255,255,.10); color: #fff;
-}
-.st-key-mapping div[data-testid="stButtonGroup"] button[data-selected] {
-  background: var(--surface2); color: var(--text);
-}
-.st-key-mapping div[data-testid="stButtonGroup"] button:nth-child(2)[data-selected] {
-  background: #e8f5ec; color: #2a6e3f;
-}
-.st-key-mapping div[data-testid="stButtonGroup"] button:nth-child(3)[data-selected] {
-  background: #fdecea; color: #9c2a22;
 }
 
 /* Refresh is a port addition, not in the template; give it the on-navy ghost look. */
@@ -566,7 +577,8 @@ _WIDGET_CSS = """
   background: rgba(255,255,255,.16); color: #fff; border-color: rgba(255,255,255,.5);
 }
 
-/* FILTER BAR - .search-box and five .filter-select, on white. The face comes
+/* FILTER BAR - four .filter-select, on white; the .search-box (f_search) sits
+   in the Product Detail toolbar and shares the st-key-f_ rules. The face comes
    from the Inter theme font: these containers are NOT .fct descendants, so they
    inherit from Streamlit's root rather than from the chrome's own rules. */
 .st-key-chrome_flt { margin-bottom: 20px; }
@@ -592,22 +604,20 @@ div[class*="st-key-f_search"] input { font-size: 13px; padding: 8px 14px; }
   border-color: var(--accent); color: var(--accent);
 }
 
-/* PRODUCT DETAIL controls - the same segmented idiom, on white rather than navy. */
-div[class*="st-key-sort_"] div[data-testid="stButtonGroup"] {
+/* BRAND CHART TOGGLES - the segmented control above each brand card
+   (seg_brand_inv, seg_brand_mkt), white on the page ground. */
+div[class*="st-key-seg_"] div[data-testid="stButtonGroup"] {
   border: 1px solid var(--border);
   border-radius: 6px; overflow: hidden; gap: 0; width: fit-content;
 }
-div[class*="st-key-sort_"] div[data-testid="stButtonGroup"] button {
+div[class*="st-key-seg_"] div[data-testid="stButtonGroup"] button {
   font-size: 11px;
   border: none; border-right: 1px solid var(--border); border-radius: 0;
   background: var(--surface); color: var(--muted); padding: 5px 12px; min-height: 0;
 }
-div[class*="st-key-sort_"] div[data-testid="stButtonGroup"] button:last-child { border-right: none; }
-div[class*="st-key-sort_"] div[data-testid="stButtonGroup"] button[data-selected] {
+div[class*="st-key-seg_"] div[data-testid="stButtonGroup"] button:last-child { border-right: none; }
+div[class*="st-key-seg_"] div[data-testid="stButtonGroup"] button[data-selected] {
   background: var(--surface2); color: var(--text); font-weight: 600;
-}
-div[class*="st-key-sort_"] input, .st-key-rows input {
-  font-size: 12px;
 }
 """
 
@@ -617,6 +627,15 @@ _CSS_BODY = (_FONT_CSS + _TOKENS_CSS + _CHIP_CSS + _CHROME_CSS + _STREAMLIT_CSS
 # Raw CSS (no <style> tag) for the table mounted via interactive.table — injected
 # into the component's shadow root.
 _TABLE_CSS_BODY = _TOKENS_CSS + _CHIP_CSS + _TABLE_CSS
+
+# Likewise for the charts mounted via interactive.chart. _CHIP_CSS brings
+# .no-data; _TOKENS_CSS the --age-*, --neg and --surface* tokens.
+_CHART_CSS_BODY = _TOKENS_CSS + _CHIP_CSS + _CHART_CSS
+
+# And for the drill-down panel mounted via interactive.detail. _TOKENS_CSS brings
+# --surface, --navy, --gold, --pos, --neg and the .fct reset; _CHIP_CSS the aging
+# chip, .status-pill and the .pill-* classes.
+_DETAIL_CSS_BODY = _TOKENS_CSS + _CHIP_CSS + _DETAIL_CSS
 
 
 def _checked(css: str, what: str) -> str:
@@ -640,6 +659,15 @@ CSS = "<style>" + _checked(_CSS_BODY, "page CSS") + "</style>"
 
 TABLE_CSS = _checked(_TABLE_CSS_BODY, "table CSS")
 
+# Component CSS is never DOMPurified, so _checked is not strictly needed here; it
+# is kept so the block stays safe to share with the page later. Keep it
+# MULTI-LINE: CCv2 reads a single-line string holding "/", "*", "[" or "]" as a
+# file path or glob, and then demands an asset_dir in pyproject.toml.
+CHART_CSS = _checked(_CHART_CSS_BODY, "chart CSS")
+
+# Same reasoning, and the same multi-line rule, as CHART_CSS.
+DETAIL_CSS = _checked(_DETAIL_CSS_BODY, "detail CSS")
+
 
 def inject_css() -> None:
     st.html(CSS)
@@ -658,28 +686,24 @@ def wrap(*parts: str) -> str:
     return open_fct() + "".join(parts) + close_fct()
 
 
-def render(*parts: str, container=None, raw: bool = False) -> None:
-    """Emit scoped chrome into ``container`` (default: the page).
+def render(*parts: str, container=None, width="stretch") -> None:
+    """Emit scoped chrome into ``container`` (default: the page) via ``st.html``.
 
-    ``raw=True`` routes through ``st.markdown`` instead of ``st.html``, and is
-    REQUIRED for anything containing SVG. ``st.html`` sanitizes with
-    DOMPurify(USE_PROFILES={'html': True}), whose tag profile carries no svg set,
-    and ``svg`` is in DOMPurify's FORBID_CONTENTS - so the element is dropped WITH
-    its children and the donut rings vanish silently. The markdown renderer runs
-    rehype-raw with no sanitizer and no element allow-list, so the SVG survives.
+    ``st.html`` is the stricter channel, and it does not re-parse the payload as
+    markdown, so a ``*`` or ``_`` in a product name stays literal. It sanitizes
+    with DOMPurify(USE_PROFILES={'html': True}), whose tag profile carries no svg
+    set, and ``svg`` is in DOMPurify's FORBID_CONTENTS, so SVG sent through here
+    is dropped WITH its children. Nothing rendered here carries SVG: the donut
+    rings are the page's only SVG, and they go out through ``interactive.chart``,
+    which sets its HTML via innerHTML inside a component shadow root that
+    DOMPurify never sees.
 
-    ``st.html`` stays the default everywhere else: it is the stricter channel and it
-    does not re-parse the payload as markdown. Inside a raw-HTML block remark does
-    no inline processing, so a ``*`` or ``_`` in a product name is safe either way -
-    but a NEWLINE in the data would close the block and hand the remainder to the
-    markdown parser, so the raw path flattens them first.
+    ``width`` is forwarded to ``st.html``. ``"content"`` lets a fragment hug its
+    text inside a horizontal container (the header). ``"stretch"``, the default,
+    fills the page's vertical containers.
     """
-    body = wrap(*parts)
     target = st if container is None else container
-    if raw:
-        target.markdown(body.replace("\n", " "), unsafe_allow_html=True)
-    else:
-        target.html(body)
+    target.html(wrap(*parts), width=width)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -728,8 +752,12 @@ def freshness_label(pulled_at: datetime, now: datetime | None = None) -> tuple[s
 # ══════════════════════════════════════════════════════════════════════════════
 # CHROME BUILDERS
 # ══════════════════════════════════════════════════════════════════════════════
-def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
-    """Header card: identity, freshness, and the three headline facts.
+def header_title_html(pulled_at: datetime | None = None) -> str:
+    """The header's left fragment: identity and freshness.
+
+    ONE fragment, because the title and the As Of / Data Pulled line share a
+    baseline (``.hdr-title-group``). The navy card around it is the
+    ``chrome_hdr`` container, and Refresh follows this fragment in that row.
 
     The template shows "AS OF <month>", but ``VAULT_INVENTORY_V`` is an SCD2 view
     with no as-of dimension and the query pins the open record — there is no
@@ -744,8 +772,6 @@ def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
                  f'<span class="dataset-value dim" title="Last query against Snowflake: '
                  f'{escape(abs_txt)}">{escape(rel)}</span>')
     return (
-        '<div class="hdr">'
-        '<div class="header-row header-row-top">'
         '<div class="hdr-title-group">'
         '<div class="logo">Vault Inventory / Dealernet</div>'
         '<div class="dataset-selector-wrap">'
@@ -754,31 +780,16 @@ def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
         'as-of dimension; the query pins the currently-open record.">Live Snapshot</span>'
         f'{fresh}'
         "</div></div>"
-        '<div class="hdr-meta">'
-        f'<div>SKUs<b>{tx.fmtq(meta["skus"])}</b></div>'
-        f'<div>Brands<b>{tx.fmtq(meta["brands"])}</b></div>'
-        f'<div>Total Value<b>{tx.fmt_abbr(meta["total_val"])}</b></div>'
-        "</div></div></div>"
     )
 
 
-def mapping_label_html() -> str:
-    """The MAPPING micro-label, left of the native toggle in the navy strip."""
-    return '<span class="header-row-label">Mapping</span>'
-
-
-def mapping_counts_html(meta: dict) -> str:
-    """The live mapped / no-price counts, right of the native toggle.
-
-    These and mapping_label_html() are the text of the template's
-    .header-row-bottom; the toggle between them is a native segmented control, so
-    the row is assembled in Streamlit rather than in one HTML string.
-    """
+def header_meta_html(meta: dict) -> str:
+    """The header's right fragment: the three headline facts."""
     return (
-        '<div class="mapping-counts">'
-        '<div class="hdr-vdiv"></div>'
-        f'<span class="header-row-label">{tx.fmtq(meta["mapped"])} Mapped '
-        f'&middot; {tx.fmtq(meta["no_price"])} No Price</span>'
+        '<div class="hdr-meta">'
+        f'<div>SKUs<b>{tx.fmtq(meta["skus"])}</b></div>'
+        f'<div>Licensors<b>{tx.fmtq(meta["brands"])}</b></div>'
+        f'<div>Total Value<b>{tx.fmt_abbr(meta["total_val"])}</b></div>'
         "</div>"
     )
 
@@ -786,18 +797,6 @@ def mapping_counts_html(meta: dict) -> str:
 def filter_badge_html() -> str:
     """The template's FILTERED pill, shown only while a filter is narrowing."""
     return '<span class="filter-badge">Filtered</span>' 
-
-
-def context_bar_html(mapping: str, view_label: str, filtered: bool) -> str:
-    scls = "" if mapping == "A" else f" status-{mapping}"
-    vcls = " view-filtered" if filtered else ""
-    return (
-        '<div class="context-bar">'
-        f'<span class="context-status{scls}">{tx.MAPPING_LABELS.get(mapping, "All Mapping")}</span>'
-        '<span class="context-sep">&middot;</span>'
-        f'<span class="context-view{vcls}">{escape(view_label)}</span>'
-        "</div>"
-    )
 
 
 def legend_html() -> str:
@@ -814,53 +813,133 @@ def section_label_html(text: str) -> str:
     return f'<div class="section-label">{escape(text)}</div>'
 
 
+def _count(n: int, noun: str) -> str:
+    """``1 brand`` / ``10 brands``: a count with its noun agreeing."""
+    return f"{tx.fmtq(n)} {noun}" if n == 1 else f"{tx.fmtq(n)} {noun}s"
+
+
 def stat_cards_html(c: dict) -> str:
     """The six KPI cards, in the workbook's order.
 
-    The margin card's markup chip is the like-for-like multiple over priced SKUs;
-    the margin figure itself nets priced market value against ALL valuation, so
-    the two deliberately do not reconcile. See ``transforms.stat_cards``.
+    Wholesale Value, Potential Profit and the markup chip are on the table's
+    basis (priced SKUs, 80% of the DN price), so each ties to its footer total.
+    See ``transforms.stat_cards``. The unpriced count appears once, on the
+    Wholesale card; the Profit card carries the unpriced cost in its tooltip
+    only. The Wholesale tooltip names the gross Market Value (unadjusted DN), the
+    one place that figure appears on the cards.
     """
-    def card(cls: str, label: str, value: str, sub: str, color: str | None = None) -> str:
+    def card(cls: str, label: str, value: str, sub: str, color: str | None = None,
+             title: str | None = None) -> str:
         style = f' style="color:{color}"' if color else ""
+        tip = f' title="{escape(title)}"' if title else ""
         return (
-            f'<div class="stat-card {cls}">'
+            f'<div class="stat-card {cls}"{tip}>'
             f'<div class="stat-card-label">{label}</div>'
             f'<div class="stat-card-value"{style}>{value}</div>'
             f'<div class="stat-card-sub">{sub}</div>'
             "</div>"
         )
 
+    factor = f"{tx.WHOLESALE_FACTOR:.0%}"
+    wholesale, profit, mkt = c["wholesale"], c["profit"], c["market"]
+    priced_n, unpriced_n = c["priced_skus"], c["unpriced_skus"]
+
+    # The cards render before the page's empty-result guard, so a view with no
+    # SKUs at all gets neither note.
+    unpriced_note = (
+        f' &middot; <span class="sub-neg">{_count(unpriced_n, "SKU")} not priced</span>'
+        if unpriced_n else " &middot; all SKUs priced" if priced_n else ""
+    )
+    wholesale_tip = (
+        f"{tx.fmt(wholesale)} Wholesale Value ({factor} of Dealernet). "
+        f"Market Value (unadjusted DN): {tx.fmt(mkt)}. {_count(priced_n, 'priced SKU')}."
+        if wholesale is not None else "No priced SKUs in this view."
+    )
+
+    profit_tip = (
+        f"{tx.fmt(profit)} = Wholesale Value − Inventory Value over "
+        f"{_count(priced_n, 'priced SKU')}."
+        if profit is not None else "No priced SKUs in this view."
+    )
+    if unpriced_n and profit is not None:
+        profit_tip += (f" Excludes {tx.fmt(c['unpriced_cost'])} of cost on "
+                       f"{_count(unpriced_n, 'unpriced SKU')}.")
     markup_chip = (
         "" if c["markup"] is None
-        else f'<span class="chip chip-up">{tx.fmt_mult(c["markup"])} markup</span>'
+        else f' &middot; <span class="chip chip-up">{tx.fmt_mult(c["markup"])} markup</span>'
     )
+    profit_color = (None if profit is None
+                    else "var(--band-dealernet)" if profit >= 0 else "var(--neg)")
+
     return (
         '<div class="stat-cards">'
         + card("", "&#9670; # of Products", tx.fmtq(c["products"]),
-               f'{c["brand_buckets"]} brand buckets')
+               _count(c["brand_buckets"], "brand"))
         + card("", "&#9670; # of SKUs", tx.fmtq(c["skus"]),
-               f'{c["box_types"]} box types')
+               _count(c["box_types"], "box type"))
         + card("", "&#9670; # of Cases", tx.fmtq_abbr(c["cases"]),
                f'{tx.fmtq(c["cases"])} cases on hand')
-        + card("stat-card-total", "Inventory Valuation", tx.fmt_abbr(c["inv_val"]),
-               "Oracle basis", "var(--gold)")
-        + card("stat-card-market", "&#9670; Current Market Value", tx.fmt_abbr(c["mkt_val"]),
-               f'Dealernet basis &middot; {c["priced_skus"]} priced SKUs', "var(--accent2)")
-        + card("stat-card-margin", "&#9670; Unrealized Gross Margin", tx.fmt_abbr(c["margin"]),
-               f"Pre-royalty &middot; vs. Oracle basis {markup_chip}",
-               "var(--band-dealernet)" if c["margin"] >= 0 else "var(--neg)")
+        + card("stat-card-total", "Inventory Value", tx.fmt_abbr(c["inv_val"]),
+               "Oracle standard cost", "var(--gold)")
+        + card("stat-card-market", "&#9670; Wholesale Value", tx.fmt_abbr(wholesale),
+               f"Dealernet &times; {factor}{unpriced_note}",
+               None if wholesale is None else "var(--accent2)", wholesale_tip)
+        + card("stat-card-margin", "&#9670; Potential Profit", tx.fmt_abbr(profit),
+               f"Pre-royalty &middot; vs. Oracle basis{markup_chip}", profit_color, profit_tip)
         + "</div>"
     )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CHARTS (inline SVG / CSS — ports of donutSvg / donutLegend / hbars)
+#
+# Mounted through interactive.chart, which turns a click on any [data-pick]
+# element into a page filter. ``selected`` is the chart's active filter value
+# (or None) and ``pickable`` the labels a click may pick: the app passes the
+# labels that have rows in the chart's own cross-filtered frame, so a pick can
+# never empty the page. The selected label is always pickable, so it can be
+# clicked off again.
 # ══════════════════════════════════════════════════════════════════════════════
 _DONUT = {"W": 150, "H": 150, "R": 56, "SW": 20}
 
 
-def _donut_svg(rows: list[dict], fmt_fn, center_label: str) -> str:
+def _pick_state(label: str, selected: str | None,
+                pickable: frozenset[str]) -> tuple[bool, str]:
+    """``(clickable, highlight class)`` for one chart item.
+
+    The class is ``is-sel`` for the selected item, ``is-dim`` for every other
+    item while a selection is active, and empty when there is none.
+    """
+    can = label in pickable or (selected is not None and label == selected)
+    state = "" if selected is None else "is-sel" if label == selected else "is-dim"
+    return can, state
+
+
+def _pick_attrs(label: str, can: bool, state: str, *, keyboard: bool) -> str:
+    """The click target's attributes: ``data-pick``, plus the keyboard set."""
+    if not can:
+        return ""
+    attrs = f' data-pick="{escape(label, quote=True)}"'
+    if keyboard:
+        pressed = "true" if state == "is-sel" else "false"
+        attrs += f' tabindex="0" role="button" aria-pressed="{pressed}"'
+    return attrs
+
+
+def _pick_hint(can: bool, state: str) -> str:
+    """The tooltip suffix naming what a click will do."""
+    if not can:
+        return ""
+    return " · click to clear" if state == "is-sel" else " · click to filter"
+
+
+def _cls(base: str, state: str) -> str:
+    return f"{base} {state}" if state else base
+
+
+def _donut_svg(rows: list[dict], fmt_fn, center_label: str, *,
+               selected: str | None = None,
+               pickable: frozenset[str] = frozenset()) -> str:
     """Arc ring with the net total in the middle.
 
     Negative values cannot be drawn: a negative ``stroke-dasharray`` renders
@@ -869,6 +948,8 @@ def _donut_svg(rows: list[dict], fmt_fn, center_label: str) -> str:
     the true net total (positives less negatives). The legend beside it still
     lists every bucket at its real value, so nothing is hidden — the ring is a
     composition of what is actually on hand.
+
+    Arcs are mouse-only click targets; the legend rows carry the keyboard path.
     """
     w, h, r, sw = _DONUT["W"], _DONUT["H"], _DONUT["R"], _DONUT["SW"]
     cx, cy = w / 2, h / 2
@@ -888,14 +969,19 @@ def _donut_svg(rows: list[dict], fmt_fn, center_label: str) -> str:
 
     arcs, cum = [], 0.0
     for row in positives:
+        label = str(row["label"])
+        can, state = _pick_state(label, selected, pickable)
+        cls = f' class="{state}"' if state else ""
         length = row["value"] / arc_total * circumference
         pct = row["value"] / arc_total * 100
         arcs.append(
-            f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="none"'
+            f'<circle{cls} cx="{cx}" cy="{cy}" r="{r}" fill="none"'
             f' stroke="{row["color"]}" stroke-width="{sw}"'
             f' stroke-dasharray="{length:.2f} {circumference - length:.2f}"'
-            f' stroke-dashoffset="{-cum:.2f}">'
-            f'<title>{escape(str(row["label"]))}: {fmt_fn(row["value"])} ({pct:.1f}%)</title>'
+            f' stroke-dashoffset="{-cum:.2f}"'
+            f'{_pick_attrs(label, can, state, keyboard=False)}>'
+            f'<title>{escape(label)}: {fmt_fn(row["value"])} ({pct:.1f}%)'
+            f'{_pick_hint(can, state)}</title>'
             "</circle>"
         )
         cum += length
@@ -912,16 +998,24 @@ def _donut_svg(rows: list[dict], fmt_fn, center_label: str) -> str:
     )
 
 
-def _donut_legend(rows: list[dict], fmt_fn) -> str:
-    """Itemised legend: dot, label, value, share of the positive total."""
+def _donut_legend(rows: list[dict], fmt_fn, *, selected: str | None = None,
+                  pickable: frozenset[str] = frozenset()) -> str:
+    """Itemised legend: dot, label, value, share of the positive total.
+
+    The legend is zero-filled, so the selected bucket always has a row to click
+    off, even when its value leaves it no arc.
+    """
     arc_total = sum(row["value"] for row in rows if row["value"] > 0)
     out = []
     for row in rows:
+        label = str(row["label"])
+        can, state = _pick_state(label, selected, pickable)
         pct = (row["value"] / arc_total * 100) if arc_total > 0 else 0.0
         out.append(
-            '<div class="donut-legend-row">'
+            f'<div class="{_cls("donut-legend-row", state)}"'
+            f'{_pick_attrs(label, can, state, keyboard=True)}>'
             f'<span class="dl-dot" style="background:{row["color"]}"></span>'
-            f'<span>{escape(str(row["label"]))}</span>'
+            f'<span class="dl-label">{escape(label)}</span>'
             f'<span class="dl-val">{fmt_fn(row["value"])}</span>'
             f'<span class="dl-pct">{pct:.1f}%</span>'
             "</div>"
@@ -930,43 +1024,69 @@ def _donut_legend(rows: list[dict], fmt_fn) -> str:
 
 
 def donut_card_html(title_prefix: str, title_bold: str, rows: list[dict],
-                    fmt_fn, center_label: str) -> str:
-    """A full donut panel: titled card, ring, and legend."""
+                    fmt_fn, center_label: str, *, selected: str | None = None,
+                    pickable: frozenset[str] = frozenset()) -> str:
+    """A full donut panel: titled card, ring, and legend.
+
+    The centre shows the net total of every bucket in ``rows``; the selection is
+    carried by the highlight, not by the total.
+    """
     return (
         '<div class="chart-wrap">'
         f'<div class="chart-title">{escape(title_prefix)} <b>{escape(title_bold)}</b></div>'
         '<div class="donut-row">'
-        + _donut_svg(rows, fmt_fn, center_label)
-        + _donut_legend(rows, fmt_fn)
+        + _donut_svg(rows, fmt_fn, center_label, selected=selected, pickable=pickable)
+        + _donut_legend(rows, fmt_fn, selected=selected, pickable=pickable)
         + "</div></div>"
     )
 
 
-def hbars_card_html(title_prefix: str, title_bold: str, rows: list[dict], fmt_fn) -> str:
+def hbars_card_html(title_prefix: str, title_bold: str, rows: list[dict], fmt_fn, *,
+                    selected: str | None = None,
+                    pickable: frozenset[str] = frozenset(),
+                    neg_below: float = 0.0, sub: str | None = None,
+                    empty: str = "No inventory matches these filters.") -> str:
     """Sorted horizontal bars — used for brand buckets, which have 10 categories.
 
-    Bar width is scaled by the largest ABSOLUTE value so a negative bucket (real,
-    caused by the retained non-positive-quantity SKUs) still renders a visible
-    bar; negatives are tinted red rather than given a negative width, which
-    would silently draw nothing.
+    Bar width is scaled by the largest ABSOLUTE value so a negative bucket still
+    renders a visible bar; bars below ``neg_below`` are tinted red rather than given a negative
+    width, which would silently draw nothing. ``neg_below`` is 0 for amounts and
+    1.0 for markup multiples (wholesale below cost).
+
+    A row's optional ``tip`` joins its tooltip. ``sub`` is a basis line under the
+    title. A ``selected`` label with no row (its bucket summed to zero or was
+    dropped) gets a placeholder row at the bottom, an empty track and an em dash,
+    so it can still be clicked off.
     """
     head = ('<div class="chart-wrap">'
-            f'<div class="chart-title">{escape(title_prefix)} <b>{escape(title_bold)}</b></div>')
+            f'<div class="chart-title">{escape(title_prefix)} <b>{escape(title_bold)}</b></div>'
+            + (f'<div class="chart-sub">{escape(sub)}</div>' if sub else ""))
+    if selected is not None and selected not in {str(row["label"]) for row in rows}:
+        rows = rows + [{"label": selected, "value": None, "color": ""}]
     if not rows:
-        return head + '<div class="no-data">No inventory matches these filters.</div></div>'
+        return head + f'<div class="no-data">{escape(empty)}</div></div>'
 
-    scale = max(abs(row["value"]) for row in rows) or 1.0
+    scale = max((abs(row["value"]) for row in rows if row["value"] is not None),
+                default=0.0) or 1.0
     bars = []
     for row in rows:
-        pct = abs(row["value"]) / scale * 100
-        color = "var(--neg)" if row["value"] < 0 else row["color"]
+        label, v = str(row["label"]), row["value"]
+        can, state = _pick_state(label, selected, pickable)
+        fill = ""
+        if v is not None:
+            color = "var(--neg)" if v < neg_below else row["color"]
+            fill = (f'<span class="hbar-fill" style="background:{color};'
+                    f'width:{abs(v) / scale * 100:.1f}%"></span>')
+        tip = f"{label}: {fmt_fn(v)}"
+        if row.get("tip"):
+            tip += f" · {row['tip']}"
         bars.append(
-            f'<div class="hbar-row" title="{escape(str(row["label"]))}: {fmt_fn(row["value"])}">'
-            f'<span class="hbar-label">{escape(str(row["label"]))}</span>'
-            '<span class="hbar-track">'
-            f'<span class="hbar-fill" style="background:{color};width:{pct:.1f}%"></span>'
-            "</span>"
-            f'<span class="hbar-val">{fmt_fn(row["value"])}</span>'
+            f'<div class="{_cls("hbar-row", state)}"'
+            f' title="{escape(tip + _pick_hint(can, state))}"'
+            f'{_pick_attrs(label, can, state, keyboard=True)}>'
+            f'<span class="hbar-label">{escape(label)}</span>'
+            f'<span class="hbar-track">{fill}</span>'
+            f'<span class="hbar-val">{fmt_fn(v)}</span>'
             "</div>"
         )
     return head + '<div class="hbars">' + "".join(bars) + "</div></div>"
@@ -985,11 +1105,36 @@ def _aging_chip(bucket) -> str:
     return f'<span class="chip chip-age" style="background:{color}">{escape(label)}</span>'
 
 
-def _price_source_pill(row) -> str:
-    src = row["price_source"]
-    if src is None or pd.isna(src):
-        return '<span class="status-pill pill-none">NO PRICE</span>'
-    return f'<span class="status-pill pill-live">{escape(str(src))}</span>'
+def _blank(v) -> bool:
+    """None, NaN, NaT or pd.NA: a field the row does not carry."""
+    return v is None or (not isinstance(v, str) and pd.isna(v))
+
+
+# price_status -> (pill class, chip word). The words are README decision 16.
+_PRICE_PILLS = {
+    tx.PRICE_LIVE: ("pill-live", "LIVE"),
+    tx.PRICE_STALE: ("pill-stale", "STALE PRICE"),
+    tx.PRICE_NONE: ("pill-none", "NO PRICE"),
+}
+
+
+def _price_status_pill(row) -> str:
+    """The detail panel's Price Status chip: LIVE / STALE PRICE / NO PRICE.
+
+    Reads ``price_status`` (data.load_inventory: No Price when there is no
+    Dealernet price, else Stale past ``tx.STALE_DAYS`` or with no sale date,
+    else Live). Stale is a confidence warning, not a missing price: its value
+    still counts everywhere. The tooltip repeats the age from ``dn_age_days``;
+    the panel's sub-line spells it out, since a tooltip alone is not
+    discoverable.
+    """
+    cls, word = _PRICE_PILLS.get(row.get("price_status"), _PRICE_PILLS[tx.PRICE_NONE])
+    age = row.get("dn_age_days")
+    tip = ""
+    if cls != "pill-none" and not _blank(age):
+        tip = (f' title="Last Dealernet case sale {_count(age, "day")} before the data '
+               f'pull (stale above {tx.STALE_DAYS})"')
+    return f'<span class="status-pill {cls}"{tip}>{word}</span>'
 
 
 def _signed(v, fmt_fn) -> str:
@@ -998,28 +1143,6 @@ def _signed(v, fmt_fn) -> str:
         return _null_cell()
     color = "var(--pos)" if float(v) >= 0 else "var(--neg)"
     return f'<span style="color:{color}">{fmt_fn(v)}</span>'
-
-
-def _mix_bar(row) -> str:
-    """Cost / margin split for ONE case, as a bar under the product name.
-
-    A flat gray bar means unpriced. When the Oracle cost exceeds the wholesale
-    price the cost segment fills the whole bar, so an underwater SKU reads as
-    all-cost rather than wrapping around.
-    """
-    price = row["dealernet_price_per_case"]
-    if price is None or pd.isna(price) or float(price) <= 0:
-        return ('<div class="mix-bar-wrap"><span class="mix-bar-seg" '
-                'style="background:#d7dee9;width:100%"></span></div>')
-    wholesale = float(price) * 0.8
-    cost = float(row["unit_cost_per_case"] or 0.0)
-    cost_pct = 100.0 if wholesale <= 0 else max(0.0, min(100.0, cost / wholesale * 100.0))
-    return (
-        '<div class="mix-bar-wrap">'
-        f'<span class="mix-bar-seg" style="background:var(--accent);width:{cost_pct:.1f}%"></span>'
-        f'<span class="mix-bar-seg" style="background:var(--accent2);width:{100 - cost_pct:.1f}%"></span>'
-        "</div>"
-    )
 
 
 def _text_cell(key: str):
@@ -1053,75 +1176,94 @@ def _sum_total(key: str, fmt_fn):
 # COLUMN SPEC — mirrors the template's GROUPS array.
 #
 # A group is (label, header_css, [columns]); a column is
-# (key, header, td_css, sort_type, cell_fn, total_fn). One definition drives the
-# two-row header, the body rows and the footer totals, so nothing can drift out
-# of alignment. Column ORDER is the workbook's, verbatim.
+# (key, header, td_css, sort_type, cell_fn, total_fn, title). One definition
+# drives the two-row header, the body rows and the footer totals, so nothing can
+# drift out of alignment. The set is the workbook's, trimmed to 15 columns (plan
+# 05): Dealernet Name, the canonical licensor, Pack Config and Dealernet Match
+# moved to the detail panel and the export, and the Inventory and Margin groups
+# were reordered.
 # ══════════════════════════════════════════════════════════════════════════════
-def _col(key, header, td, sort_type, cell, total=None):
+def _col(key, header, td, sort_type, cell, total=None, title=None):
     return {"key": key, "header": header, "td": td, "sort": sort_type,
-            "cell": cell, "total": total}
+            "cell": cell, "total": total, "title": title}
+
+
+def _mult(v) -> str:
+    """Markup multiple: neutral text, red only below 1.0x (worth less than it cost).
+
+    README decision 15. Every SKU is above 1.0x today, so green would turn the
+    whole column green and hide nothing. Red still flags the rows where, for a
+    positive-cost row, profit is negative.
+    """
+    if v is None or pd.isna(v):
+        return _null_cell()
+    if float(v) < 1.0:
+        return f'<span style="color:var(--neg)">{tx.fmt_mult(v)}</span>'
+    return tx.fmt_mult(v)
+
+
+def _name_cell(r) -> str:
+    # The cell ellipsizes at max-width; the title carries the full name.
+    name = escape(str(r["product_name"] or ""))
+    return f'<span title="{name}">{name}</span>'
+
+
+def _adj_dn_cell(r) -> str:
+    # The dot goes BEFORE the number so right-aligned digits stay aligned.
+    dot = ""
+    if r.get("price_status") == tx.PRICE_STALE:
+        dot = ('<span class="stale-dot" title="Stale price: last Dealernet sale '
+               f'{tx.fmt_date(r["dn_latest_date"])}"></span>')
+    return dot + tx.fmt(r["adj_dn_price_per_case"])
 
 
 GROUPS = [
-    # The anchor column sits outside every band — black header, pinned, and it
-    # carries the cost/margin mini-bar under the product name.
+    # The anchor column sits outside every band: black header, pinned.
     ("", "", [
-        _col("product_name", "Product Name (Oracle)", "", "text",
-             lambda r: escape(str(r["product_name"] or "")) + _mix_bar(r)),
+        _col("product_name", "Product Name (Oracle)", "", "text", _name_cell),
     ]),
     ("&#9670; Identity", "th-identity", [
-        _col("dealernet_name", "Dealernet Name", "td-left", "text", _text_cell("dealernet_name")),
         _col("box_type", "Box Type", "td-left", "text", _text_cell("box_type")),
         _col("item_number", "Item Number", "td-left td-code", "text", _text_cell("item_number")),
-        _col("brand_bucket", "Brand Bucket", "td-left td-muted", "text", _text_cell("brand_bucket")),
+        _col("brand_bucket", "Brand", "td-left td-muted", "text", _text_cell("brand_bucket")),
     ]),
     ("&#9670; Inventory", "th-inventory", [
-        _col("quantity_cases", "Qty (Cases)", "", "num",
-             _num_cell("quantity_cases", tx.fmtq), _sum_total("quantity_cases", tx.fmtq)),
         _col("street_date", "Street Date", "td-muted", "num", _date_cell("street_date")),
         _col("aging_bucket", "Aging Bucket", "td-left", "text",
              lambda r: _aging_chip(r["aging_bucket"])),
-        _col("brand", "Brand", "td-left td-muted", "text", _text_cell("brand")),
+        # Fractional when a key holds -DB boxes or -PCK packs (0.50, 53.25).
+        _col("quantity_cases", "Qty (Cases)", "", "num",
+             _num_cell("quantity_cases", tx.fmt_cases),
+             _sum_total("quantity_cases", tx.fmt_cases)),
         _col("inventory_value", "Inventory Value", "td-total", "num",
              _num_cell("inventory_value", tx.fmt), _sum_total("inventory_value", tx.fmt)),
-    ]),
-    ("&#9670; Pack Config", "th-pack", [
-        _col("boxes_per_case", "Boxes / Case", "td-muted", "num", _num_cell("boxes_per_case", tx.fmt_int)),
-        _col("packs_per_box", "Packs / Box", "td-muted", "num", _num_cell("packs_per_box", tx.fmt_int)),
-        _col("cards_per_pack", "Cards / Pack", "td-muted", "num", _num_cell("cards_per_pack", tx.fmt_int)),
     ]),
     ("&#9670; Pricing", "th-pricing", [
         _col("unit_cost_per_case", "Unit Cost / Case", "", "num",
              _num_cell("unit_cost_per_case", tx.fmt)),
-        _col("dealernet_price_per_case", "DN Price / Case", "", "num",
-             _num_cell("dealernet_price_per_case", tx.fmt)),
+        _col("adj_dn_price_per_case", "Adj. DN Price / Case", "", "num", _adj_dn_cell,
+             title="Dealernet average case sale × 80% — the price behind Wholesale Value"),
         _col("wholesale_value", "Wholesale Value", "", "num",
              _num_cell("wholesale_value", tx.fmt), _sum_total("wholesale_value", tx.fmt)),
     ]),
     ("&#9670; Margin", "th-margin", [
-        # The footer % is Σprofit / Σwholesale from transforms.table_totals, not an
-        # average of the per-row percentages.
-        _col("margin_pct", "Margin %", "", "num",
-             lambda r: _signed(r["margin_pct"], tx.fmt_pct), _sum_total("margin_pct", tx.fmt_pct)),
         _col("total_potential_profit", "Potential Profit", "", "num",
              lambda r: _signed(r["total_potential_profit"], tx.fmt),
              _sum_total("total_potential_profit", tx.fmt)),
         _col("margin_dollars_per_case", "Margin $ / Case", "", "num",
              lambda r: _signed(r["margin_dollars_per_case"], tx.fmt)),
-    ]),
-    ("&#9670; Dealernet Match", "th-dealernet", [
-        _col("price_source", "Price Source", "td-left", "text", _price_source_pill),
-        _col("dn_listing_count", "DN Listings", "td-muted", "num",
-             lambda r: tx.fmtq(r["dn_listing_count"]) if r["dn_listing_count"] else _null_cell(),
-             _sum_total("dn_listing_count", tx.fmtq)),
-        _col("dn_latest_date", "DN Latest", "td-muted", "num", _date_cell("dn_latest_date")),
+        # Footer ratios are recomputed from sums in transforms.table_totals,
+        # never averaged across rows.
+        _col("margin_pct", "Margin %", "", "num",
+             lambda r: _signed(r["margin_pct"], tx.fmt_pct), _sum_total("margin_pct", tx.fmt_pct)),
+        _col("markup_multiple", "Markup Multiple", "", "num",
+             lambda r: _mult(r["markup_multiple"]), _sum_total("markup_multiple", tx.fmt_mult),
+             title="Wholesale Value ÷ Inventory Value"),
     ]),
 ]
 
 COLUMNS = [c for _label, _css, cols in GROUPS for c in cols]
 COLUMN_BY_KEY = {c["key"]: c for c in COLUMNS}
-# Sort-menu options: the on-screen header paired with its column key.
-SORT_OPTIONS = [(c["key"], c["header"]) for c in COLUMNS]
 
 
 def _td_attr(col: dict) -> str:
@@ -1131,12 +1273,14 @@ def _td_attr(col: dict) -> str:
 
 def product_table_html(df: pd.DataFrame, totals: dict, *, selected: str | None,
                        sort_col: str, sort_asc: bool) -> str:
-    """The 22-column banded product table.
+    """15-column banded product table (anchor + four groups).
 
     Rows carry ``data-key`` (the item number) and header cells carry
     ``data-sort`` (the column key); ``interactive.table`` binds click listeners to
     both. No inline ``onclick`` — the SiS content-security policy forbids it, and
-    the component's JS is the supported path.
+    the component's JS is the supported path. The headers are the only sort
+    control, so each carries a tooltip: the column's own ``title`` where one is
+    set, otherwise the click hint.
     """
     ghead = ['<tr class="col-group-header">']
     chead = ["<tr>"]
@@ -1153,9 +1297,11 @@ def product_table_html(df: pd.DataFrame, totals: dict, *, selected: str | None,
                 classes.append("sorted")
             cls = f' class="{" ".join(classes)}"' if classes else ""
             arrow = ("↑" if sort_asc else "↓") if c["key"] == sort_col else "↕"
-            dim = "" if c["key"] == sort_col else ' style="opacity:.3"'
+            dim = "" if c["key"] == sort_col else ' style="opacity:.45"'
+            # Headers are otherwise raw HTML, so the title must be escaped.
+            tip = escape(c["title"] or "Click to sort; click again to reverse")
             chead.append(
-                f'<th{cls} data-sort="{escape(c["key"])}">{c["header"]}'
+                f'<th{cls} data-sort="{escape(c["key"])}" title="{tip}">{c["header"]}'
                 f'<span class="sort-arrow"{dim}>{arrow}</span></th>'
             )
     ghead.append("</tr>")
@@ -1168,12 +1314,16 @@ def product_table_html(df: pd.DataFrame, totals: dict, *, selected: str | None,
         sel = ' class="selected"' if selected is not None and key == selected else ""
         cells = "".join(f"<td{_td_attr(c)}>{c['cell'](row)}</td>" for c in COLUMNS)
         body.append(f'<tr data-key="{escape(key)}"{sel}>{cells}</tr>')
+    # The page stops on an empty dropdown slice before the table is built, so
+    # the only way to reach an empty table is a search with no match.
     if not body:
         body = [f'<tr><td class="no-data" colspan="{ncols}">'
-                "No products match these filters.</td></tr>"]
+                "No products match this search.</td></tr>"]
 
     # Footer totals cover the WHOLE filtered set, which is the same set the table
-    # renders (there is no pagination), so the numbers tie to what is on screen.
+    # renders (there is no pagination; rows past the 25-row cap scroll), so the
+    # numbers tie to the table and, with the search empty, to the Cases and
+    # Inventory Value tiles. The market tiles are gross; see transforms.stat_cards.
     fcells = [f'<td>TOTAL ({tx.fmtq(totals.get("_rows", len(df)))} SKUs)</td>']
     for c in COLUMNS[1:]:
         fcells.append(f"<td{_td_attr(c)}>{c['total'](totals) if c['total'] else ''}</td>")
@@ -1186,43 +1336,121 @@ def product_table_html(df: pd.DataFrame, totals: dict, *, selected: str | None,
 
 
 def detail_panel_html(row) -> str:
-    """Inline drill-down panel for one SKU — 12 cells, the template's set.
+    """Inline drill-down panel for one SKU: 12 tiles in a fixed 4-column grid.
 
-    An expanding panel rather than an overlay modal, matching the template (which
-    has no true modals either).
+    Three rows, so the columns line up as cost over market over margin:
+
+    * Inventory: Street Date (with its aging chip), Qty (Cases), Pack Config,
+      Inventory Value (with the unit cost per case).
+    * Dealernet: Price Status (LIVE / STALE PRICE / NO PRICE, with the last sale,
+      its age and the sale count), Dealernet Name (with the year match), DN Price
+      / Case (the full average case sale, with the 80% price), Wholesale Value.
+    * Margin: Potential Profit, Margin $ / Case, Margin %, Markup Multiple.
+
+    The header badges are the item key, the brand bucket and the licensor.
+
+    Per-case figures come from the per-case columns, never value ÷ qty: a key can
+    merge a ``-CSE`` and a ``-DB`` row.
+    An unpriced SKU shows an em dash on every Dealernet and margin tile. Without
+    an Oracle cost, Margin $ / Case is an em dash too, since it would otherwise
+    report the whole adjusted price as margin.
+
+    The output goes straight to ``interactive.detail``, whose shell supplies the
+    ``.fct`` wrapper, so it is NOT passed through ``render``. The component sets
+    it with ``innerHTML``, which does no sanitising, so every data string is
+    escaped here. An expanding panel rather than an overlay modal, matching the
+    template (which has no true modals either).
     """
-    def cell(label: str, value: str, color: str | None = None) -> str:
+    def cell(label: str, value: str, color: str | None = None, sub: str | None = None,
+             cls: str = "") -> str:
         style = f' style="color:{color}"' if color else ""
+        val_cls = f"dc-val {cls}" if cls else "dc-val"
+        sub_html = f'<div class="dc-sub">{sub}</div>' if sub else ""
         return (f'<div class="detail-cell"><div class="dc-lbl">{label}</div>'
-                f'<div class="dc-val"{style}>{value}</div></div>')
+                f'<div class="{val_cls}"{style}>{value}</div>{sub_html}</div>')
 
-    dn_name = row["dealernet_name"]
-    dn_cell = escape(str(dn_name)) if dn_name and not pd.isna(dn_name) else _null_cell()
+    factor = f"{tx.WHOLESALE_FACTOR:.0%}"
+    priced = not _blank(row["dealernet_price_per_case"])
+    qty = row["quantity_cases"]
+    unit_cost = row["unit_cost_per_case"]
+    has_cost = not _blank(unit_cost) and float(unit_cost) > 0
+    adj = row["adj_dn_price_per_case"]
+
+    # ── Inventory row ──
+    street = f'{tx.fmt_date(row["street_date"])} {_aging_chip(row["aging_bucket"])}'
+    qty_sub = "None on hand" if float(qty) <= 0 else None
+    # A fractional Qty comes from -DB boxes / -PCK packs: name the physical holding
+    # ("52 cases + 10 display boxes"). The case count is what is left of the
+    # case-equivalents once the boxes and packs are taken out.
+    boxes, packs = row.get("display_boxes"), row.get("loose_packs")
+    boxes = 0.0 if _blank(boxes) else float(boxes)
+    packs = 0.0 if _blank(packs) else float(packs)
+    if boxes or packs:
+        bpc = pd.to_numeric(row.get("boxes_per_case"), errors="coerce")
+        ppb = pd.to_numeric(row.get("packs_per_box"), errors="coerce")
+        cases = float(qty)
+        if boxes and pd.notna(bpc) and bpc:
+            cases -= boxes / bpc
+        if packs and pd.notna(bpc) and bpc and pd.notna(ppb) and ppb:
+            cases -= packs / (bpc * ppb)
+        held = [f"{tx.fmt_cases(cases)} case{'' if round(cases, 2) == 1 else 's'}"
+                ] if round(cases, 2) else []
+        if boxes:
+            held.append(f"{tx.fmt_cases(boxes)} display box{'' if boxes == 1 else 'es'}")
+        if packs:
+            held.append(f"{tx.fmt_cases(packs)} pack{'' if packs == 1 else 's'}")
+        qty_sub = " + ".join(held)
     pack = " × ".join(tx.fmt_int(row[k]) for k in
                       ("boxes_per_case", "packs_per_box", "cards_per_pack"))
-    listings = (
-        f'{tx.fmtq(row["dn_listing_count"])} &middot; {tx.fmt_date(row["dn_latest_date"])}'
-        if row["dn_listing_count"] else _null_cell()
-    )
+    cost_sub = f"{tx.fmt(unit_cost)} / case unit cost" if has_cost else "No Oracle cost"
+
+    # ── Dealernet row ──
+    if priced:
+        latest, age = row["dn_latest_date"], row["dn_age_days"]
+        parts = [f"Last DN sale {tx.fmt_date(latest)}" if not _blank(latest)
+                 else "Last DN sale date unknown"]
+        if not _blank(age):
+            parts.append("today" if age == 0 else f"{_count(age, 'day')} ago")
+        if not _blank(row["dn_listing_count"]):
+            parts.append(_count(row["dn_listing_count"], "sale"))
+        status_sub = " &middot; ".join(parts)
+        if row["price_status"] == tx.PRICE_STALE:
+            status_sub = f'<span class="sub-stale">{status_sub}</span>'
+    else:
+        status_sub = "No Dealernet case sales matched"
+    dn_name = "" if _blank(row["dealernet_name"]) else str(row["dealernet_name"]).strip()
+    match = row["year_match_type"]
+    name_sub = escape(str(match)) if priced and not _blank(match) else None
+
     return (
         '<div class="detail-panel">'
         '<div class="detail-panel-header">'
         f'<div class="detail-panel-title">{escape(str(row["product_name"] or ""))}</div>'
-        f'<span class="detail-count-badge">{escape(str(row["item_number"]))}</span>'
-        f'<span class="detail-count-badge">{escape(str(row["brand_bucket"]))}</span>'
-        "</div>"
+        # item_key: the product, whichever of its case / -DB / -PCK rows the
+        # table's item_number names.
+        + "".join(f'<span class="detail-count-badge">{escape(str(row[k]))}</span>'
+                  for k in ("item_key", "brand_bucket", "brand") if not _blank(row[k]))
+        + "</div>"
         '<div class="detail-grid">'
-        + cell("Dealernet Name", dn_cell)
-        + cell("Mapping Status", _price_source_pill(row))
-        + cell("Aging Bucket", _aging_chip(row["aging_bucket"]))
-        + cell("Street Date", tx.fmt_date(row["street_date"]))
-        + cell("Qty (Cases)", tx.fmtq(row["quantity_cases"]))
-        + cell("Pack Config", pack)
-        + cell("Inventory Value", tx.fmt(row["inventory_value"]), "var(--gold)")
-        + cell("Wholesale Value", tx.fmt(row["wholesale_value"]), "var(--accent2)")
+        + cell("Street Date", street)
+        + cell("Qty (Cases)", tx.fmt_cases(qty), sub=qty_sub)
+        + cell("Pack Config", pack, sub="Boxes &middot; packs &middot; cards")
+        + cell("Inventory Value", tx.fmt(row["inventory_value"]), "var(--gold)", cost_sub)
+        + cell("Price Status", _price_status_pill(row), sub=status_sub)
+        + cell("Dealernet Name", escape(dn_name) if dn_name else _null_cell(),
+               sub=name_sub, cls="dc-text")
+        + cell("DN Price / Case",
+               tx.fmt(row["dealernet_price_per_case"]) if priced else _null_cell(),
+               sub=f"{tx.fmt(adj)} at {factor}" if priced else None)
+        + cell("Wholesale Value",
+               tx.fmt(row["wholesale_value"]) if priced else _null_cell(),
+               "var(--accent2)" if priced else None,
+               f"{tx.fmt(adj)} / case (DN × {factor})" if priced else "Not priced")
+        + cell("Potential Profit", _signed(row["total_potential_profit"], tx.fmt),
+               sub="Pre-royalty" if priced else None)
+        + cell("Margin $ / Case",
+               _signed(row["margin_dollars_per_case"], tx.fmt) if has_cost else _null_cell())
         + cell("Margin %", _signed(row["margin_pct"], tx.fmt_pct))
-        + cell("Potential Profit", _signed(row["total_potential_profit"], tx.fmt))
-        + cell("Markup Multiple", tx.fmt_mult(row["markup_multiple"]))
-        + cell("DN Listings", listings)
+        + cell("Markup Multiple", _mult(row["markup_multiple"]))
         + "</div></div>"
     )

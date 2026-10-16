@@ -17,8 +17,13 @@ from __future__ import annotations
 
 import io
 import math
+from datetime import datetime, timezone
 
 import pandas as pd
+
+# Dealernet wholesale discount. Mirrors the 0.8 literals in queries.INVENTORY_SQL
+# (wholesale_value and the margin columns); change both together.
+WHOLESALE_FACTOR = 0.8
 
 # ── null rendering ────────────────────────────────────────────────────────────
 # The template's em dash. Every formatter returns it for None/NaN so an unpriced
@@ -77,6 +82,18 @@ def fmtq(v) -> str:
     if _is_null(v):
         return NULL_CELL
     return f"{_jsround(v):,}"
+
+
+def fmt_cases(v) -> str:
+    """Cases: whole when integral (``1,234``), else two decimals (``53.25``).
+
+    ``-DB`` boxes and ``-PCK`` packs arrive as fractional case-equivalents, so a
+    per-SKU quantity can be 0.50. Not a template port: the template predates them.
+    """
+    if _is_null(v):
+        return NULL_CELL
+    v = float(v)
+    return f"{_jsround(v):,}" if abs(v - round(v)) < 1e-9 else f"{v:,.2f}"
 
 
 def fmtq_abbr(v) -> str:
@@ -176,7 +193,7 @@ OTHER_GRAY = "#9ca3af"
 # Workbook ordering. Indexing colour by THIS list rather than by the filtered
 # result means a bucket keeps its colour no matter what the filter leaves behind.
 BRAND_ORDER = ["Baseball", "Basketball", "Entertainment", "Football", "Other",
-               "Contact Sports", "Soccer", "NIL", "Formula One", "Tennis"]
+               "Combat", "Soccer", "NIL", "Formula One", "Tennis"]
 
 
 def brand_color(bucket) -> str:
@@ -240,13 +257,10 @@ def canonical_brand(s: pd.Series) -> pd.Series:
     than collapse into a catch-all, which is the trap ``brand_bucket``'s 'Other'
     COALESCE already sets (README caveat 3).
 
-    Deliberately does NOT touch ``brand_bucket``: that column is keyed on the
-    RAW brand in SQL, and Sigma buckets CHP as 'Other' while bucketing UEFA
-    CHAMPIONS LEAGUE as 'Soccer' (likewise TRB vs TOP RANK BOXING). Re-deriving
-    the bucket from the canonical name here would move ~$167k out of 'Other'
-    into 'Soccer' — defensible in the abstract, but it breaks brand-bucket
-    parity with the prod workbook. So a merged brand can legitimately show two
-    bucket values in the table, and that is why the bar charts are unaffected.
+    Does not touch ``brand_bucket``: the SQL keys that column on the RAW brand,
+    so CHP and UEFA CHAMPIONS LEAGUE arrive in different buckets (likewise TRB
+    and TOP RANK BOXING). ``canonical_bucket`` corrects the bucket separately,
+    from this function's output.
     """
     # astype(str) renders a null as the string "None", which is not a key, so a
     # null brand falls through the where() and stays null.
@@ -254,21 +268,59 @@ def canonical_brand(s: pd.Series) -> pd.Series:
     return s.where(~key.isin(BRAND_CANON), key.map(BRAND_CANON))
 
 
-# Mapping-status toggle: display label -> code, and code -> the value to match.
-MAPPING_OPTS = {"All": "A", "Mapped": "S", "No Price": "O"}
-MAPPING_LABELS = {"A": "All Mapping", "S": "Mapped", "O": "No Price"}
-_MAPPING_MATCH = {"S": "Mapped", "O": "No Price"}
+# Display fixes on top of the SQL's brand_mapping (David, 2026-09-29). Keyed on the
+# CANONICAL brand, so both Oracle spellings of a brand move together.
+BUCKET_BY_BRAND = {
+    "CHP": "Soccer",   # UEFA Champions League; the long form already buckets to Soccer
+    "TRB": "Combat",   # Top Rank Boxing; TOP RANK BOXING already buckets to Contact Sports
+}
+BUCKET_RENAME = {"Contact Sports": "Combat"}
+
+
+def canonical_bucket(bucket: pd.Series, brand: pd.Series) -> pd.Series:
+    """The SQL's brand bucket with the display fixes above applied.
+
+    ``brand`` must already be canonical (``canonical_brand``). Anything not listed
+    passes through, including 'Other' for unmapped brands.
+    """
+    out = bucket.replace(BUCKET_RENAME)
+    over = brand.map(BUCKET_BY_BRAND)
+    return over.where(over.notna(), out)
+
+
+# ── Dealernet price freshness ─────────────────────────────────────────────────
+STALE_DAYS = 90
+PRICE_LIVE, PRICE_STALE, PRICE_NONE = "Live", "Stale", "No Price"
+
+
+def price_age_days(latest: pd.Series, as_of: datetime) -> pd.Series:
+    """Whole days from the last Dealernet sale to ``as_of``, on UTC calendar dates."""
+    as_of_day = pd.Timestamp(as_of.astimezone(timezone.utc).date())
+    lt = pd.to_datetime(latest, errors="coerce")
+    # Guard: load_inventory makes the column naive, but a tz-aware column minus
+    # a naive Timestamp raises TypeError in pandas 3.
+    if lt.dt.tz is not None:
+        lt = lt.dt.tz_convert("UTC").dt.tz_localize(None)
+    return (as_of_day - lt.dt.normalize()).dt.days.astype("Int64")
+
+
+def price_status(priced: pd.Series, age_days: pd.Series) -> pd.Series:
+    """Live / Stale (> STALE_DAYS since last sale, or date unknown) / No Price."""
+    out = pd.Series(PRICE_NONE, index=priced.index, dtype="object")
+    out[priced] = PRICE_LIVE
+    fresh = (age_days <= STALE_DAYS).fillna(False).astype(bool)
+    out[priced & ~fresh] = PRICE_STALE
+    return out
 
 
 # ── filtering (port of filteredRows) ─────────────────────────────────────────
-# (session-state key, dataframe column) for the five dropdown filters, in the
-# template's on-screen order.
+# (session-state key, dataframe column, "all" label) for the dropdown filters, in
+# the template's on-screen order. The filter bar sizes itself from this list.
 FILTER_SPECS = [
     ("f_brand_bucket", "brand_bucket", "All Brand Buckets"),
     ("f_aging", "aging_bucket", "All Aging Buckets"),
     ("f_year", "street_date_year", "All Street Years"),
     ("f_box_type", "box_type", "All Box Types"),
-    ("f_price_source", "price_source", "All Price Sources"),
 ]
 
 
@@ -277,7 +329,7 @@ def filter_options(df: pd.DataFrame) -> dict[str, list[str]]:
 
     Derived from the FULL snapshot, not the filtered view, so the option lists
     stay stable as the user narrows down — the template does the same. NULLs are
-    excluded, which is why picking a Price Source implicitly drops unmapped SKUs.
+    excluded, so a filter never offers "no value" as an option.
     """
     out: dict[str, list[str]] = {}
     for key, col, _all_label in FILTER_SPECS:
@@ -310,25 +362,15 @@ def _opt_str(v) -> str:
     return str(v)
 
 
-def apply_filters(df: pd.DataFrame, *, mapping: str = "A", search: str = "",
-                  selections: dict[str, str] | None = None) -> pd.DataFrame:
-    """The template's ``filteredRows``: mapping toggle, text search, then dropdowns.
+def apply_filters(df: pd.DataFrame, *, selections: dict[str, str] | None = None
+                  ) -> pd.DataFrame:
+    """Dropdown filters (and plan 04's chart picks, which set the same keys).
 
-    ``mapping`` is a code from ``MAPPING_OPTS``. ``search`` matches product name
-    OR item number, case-insensitively. ``selections`` maps a ``FILTER_SPECS``
-    key to a chosen option string; ``""`` means "all".
+    The page frame: tiles, header, notes, charts and the detail lookup read it.
+    ``selections`` maps a ``FILTER_SPECS`` key to a chosen option string; ``""``
+    means "all". Search is NOT applied here; see ``search_rows``.
     """
     out = df
-    want = _MAPPING_MATCH.get(mapping)
-    if want is not None:
-        out = out[out["mapping_status"] == want]
-
-    q = (search or "").strip().lower()
-    if q:
-        hay = (out["product_name"].fillna("").astype(str).str.lower()
-               + "\x00" + out["item_number"].fillna("").astype(str).str.lower())
-        out = out[hay.str.contains(q, regex=False)]
-
     for key, col, _all_label in FILTER_SPECS:
         chosen = (selections or {}).get(key, "")
         if chosen:
@@ -338,13 +380,28 @@ def apply_filters(df: pd.DataFrame, *, mapping: str = "A", search: str = "",
     return out
 
 
+def search_rows(df: pd.DataFrame, search: str) -> pd.DataFrame:
+    """Product-name OR item-number substring match, case-insensitive.
+
+    The table frame: applied to the page frame for the table, its footer, the
+    export and the drill-down options only, so a search never moves a tile or a
+    chart. An empty search returns ``df`` unchanged.
+    """
+    q = (search or "").strip().lower()
+    if not q:
+        return df
+    hay = (df["product_name"].fillna("").astype(str).str.lower()
+           + "\x00" + df["item_number"].fillna("").astype(str).str.lower())
+    return df[hay.str.contains(q, regex=False)]
+
+
 # ── aggregation ───────────────────────────────────────────────────────────────
 def _dcount(df: pd.DataFrame, col: str) -> int:
     return int(df[col].dropna().nunique())
 
 
 def header_meta(df: pd.DataFrame) -> dict:
-    """The header's right-hand facts plus the mapping split.
+    """The header's right-hand facts.
 
     ``brands`` counts the CANONICAL brand — ``data.load_inventory`` folds
     Oracle's duplicate spellings (MLB / MAJOR LEAGUE BASEBALL) onto one label
@@ -355,61 +412,95 @@ def header_meta(df: pd.DataFrame) -> dict:
     reason: the bucket folds every unmapped brand into 'Other', which would
     understate the real brand spread.
     """
-    mapped = int((df["mapping_status"] == "Mapped").sum())
     return {
         "skus": _dcount(df, "item_number"),
         "brands": _dcount(df, "brand"),
         "total_val": float(df["inventory_value"].sum()),
-        "mapped": mapped,
-        "no_price": int(len(df)) - mapped,
     }
+
+
+def priced_mask(df: pd.DataFrame) -> pd.Series:
+    """Rows that carry a wholesale value: the one definition of 'priced'.
+
+    Used by the KPI tiles, the table footer markup (plan 05), the brand markup
+    chart (plan 04) and the 'N not priced' note (plan 03), so a ratio's
+    numerator and denominator always cover the same rows."""
+    return df["wholesale_value"].notna()
+
+
+def _sum_or_none(s: pd.Series) -> float | None:
+    """Σ that stays None when nothing is summable. pandas returns 0.0 for an
+    all-NaN sum, which would render an all-unpriced slice as '$0'."""
+    v = s.sum(min_count=1)
+    return None if pd.isna(v) else float(v)
+
+
+def markup_ratio(df: pd.DataFrame) -> float | None:
+    """Σwholesale / Σinventory over PRICED rows (wholesale_value not null).
+
+    Like-for-like: unpriced cost is excluded from the denominator. None when
+    priced cost is not positive, which is also plan 04's skip rule for a bucket.
+    """
+    priced = df[priced_mask(df)]
+    inv = float(priced["inventory_value"].sum())
+    return float(priced["wholesale_value"].sum()) / inv if inv > 0 else None
 
 
 def stat_cards(df: pd.DataFrame) -> dict:
     """The six KPI figures, in the workbook's order.
 
-    Three subtleties carried over from the workbook on purpose:
+    The two value tiles share the table's basis, PRICED SKUs at the 80%
+    wholesale factor, so each ties to its footer total to the cent:
 
-    * The market figures read ``market_value`` (GROSS ``dn_price x qty``), not
-      ``wholesale_value``. Sigma applies its 0.8 Dealernet discount in the
-      WHOLESALE VALUE table column and NOT in these KPIs; sourcing them from the
-      discounted column understates both by 20%. Verified against the workbook
-      2026-09-15. Do not "unify" the two bases — the asymmetry is Sigma's.
-    * ``margin`` nets the market value of PRICED SKUs against the valuation of
-      ALL SKUs, so unpriced inventory drags it down. That is the workbook's own
-      formula, not an oversight here.
-    * ``markup`` uses priced rows for BOTH numerator and denominator, so it is a
-      like-for-like multiple and does not inherit that drag.
+    * ``wholesale`` is Σ``wholesale_value`` (Wholesale Value = 80% of the DN
+      price × qty), the headline figure.
+    * ``profit`` is Σ``total_potential_profit`` over priced SKUs (Potential
+      Profit = Wholesale Value − Inventory Value). Unpriced SKUs are excluded,
+      not counted at $0; ``unpriced_skus`` and ``unpriced_cost`` report what is
+      left out, for the cards' sub-line and tooltip.
+    * ``markup`` is ``markup_ratio``, the footer's Markup Multiple, so the chip
+      and the footer are the same figure by construction.
+    * ``market`` is Σ gross ``market_value`` (Market Value = unadjusted DN
+      price × qty), carried for the Wholesale Value tile's tooltip only.
+
+    This knowingly diverges from Sigma's two KPI cards, which are on the gross
+    basis (Current Market Value, Unrealized Gross Margin); see README caveat 5.
+
+    A slice with no priced SKU gives None, not 0.0 (``_sum_or_none``), so both
+    value tiles read "—" like the footer.
     """
-    priced = df[df["dealernet_price_per_case"].notna()]
-    inv_val = float(df["inventory_value"].sum())
-    mkt_val = float(df["market_value"].sum())
-    priced_inv = float(priced["inventory_value"].sum())
-    priced_mkt = float(priced["market_value"].sum())
-    cases = float(df["quantity_cases"].sum())
+    mask = priced_mask(df)
+    priced = df[mask]
+    unpriced = df[~mask]
     return {
         "products": _dcount(df, "product_name"),
         "brand_buckets": _dcount(df, "brand_bucket"),
         "skus": _dcount(df, "item_number"),
         "box_types": _dcount(df, "box_type"),
-        "cases": cases,
-        "inv_val": inv_val,
-        "mkt_val": mkt_val,
+        "cases": float(df["quantity_cases"].sum()),
+        "inv_val": float(df["inventory_value"].sum()),
+        "wholesale": _sum_or_none(priced["wholesale_value"]),
+        "profit": _sum_or_none(priced["total_potential_profit"]),
+        "market": _sum_or_none(df["market_value"]),     # NULL on unpriced rows
         "priced_skus": int(len(priced)),
-        "margin": mkt_val - inv_val,
-        "markup": (priced_mkt / priced_inv) if priced_inv else None,
+        "unpriced_skus": int(len(unpriced)),
+        "unpriced_cost": float(unpriced["inventory_value"].sum()),
+        "markup": markup_ratio(df),
     }
 
 
-def aging_composition(df: pd.DataFrame, value_col: str) -> list[dict]:
+def aging_composition(df: pd.DataFrame, value_col: str, *,
+                      selected: str | None = None) -> list[dict]:
     """Rows for one aging donut: every bucket, in ramp order, zero-filled.
 
     Buckets with no rows are kept at 0 so the legend is a stable five (or six)
-    entries regardless of the filter. 'Unknown' appears only if present.
+    entries regardless of the filter. 'Unknown' appears only if present, or
+    when it is the chart's ``selected`` bucket, so a picked 'Unknown' always
+    keeps a legend row to click off again.
     """
     grouped = df.groupby("aging_bucket", observed=False)[value_col].sum()
     buckets = list(AGING_ORDER)
-    if float(grouped.get(AGING_UNKNOWN, 0.0)) != 0.0:
+    if float(grouped.get(AGING_UNKNOWN, 0.0)) != 0.0 or selected == AGING_UNKNOWN:
         buckets.append(AGING_UNKNOWN)
     return [{"label": b, "value": float(grouped.get(b, 0.0)), "color": AGING_COLOR[b]}
             for b in buckets]
@@ -419,8 +510,7 @@ def brand_composition(df: pd.DataFrame, value_col: str) -> list[dict]:
     """Rows for one brand-bucket bar chart, largest first.
 
     Zero-value buckets are dropped (an empty bar carries no information), but
-    NEGATIVE ones are kept — they are real, caused by the retained non-positive
-    quantity SKUs, and hiding them would break the tie to the KPI total.
+    a NEGATIVE one would be kept: hiding it would break the tie to the KPI total.
     """
     grouped = df.groupby("brand_bucket", observed=True)[value_col].sum()
     rows = [{"label": str(k), "value": float(v), "color": brand_color(k)}
@@ -429,20 +519,33 @@ def brand_composition(df: pd.DataFrame, value_col: str) -> list[dict]:
     return rows
 
 
-def brand_margin_composition(df: pd.DataFrame) -> list[dict]:
-    """Rows for the Unrealized Gross Margin bar chart, largest first.
+def brand_markup(df: pd.DataFrame) -> list[dict]:
+    """Σwholesale ÷ Σinventory_value per bucket, PRICED rows only, largest first.
 
-    Same formula as ``stat_cards()["margin"]`` — market value of priced SKUs
-    minus the valuation of ALL SKUs (unpriced rows count as 0 market value) —
-    so the bars sum to the KPI card. Brands that net negative are kept.
+    Each bucket's multiple is ``markup_ratio`` over that bucket's rows: the same
+    basis as the table footer's Markup Multiple (not the gross tile chip), recomputed
+    from sums, never averaged per row. So a bucket's bar equals the footer
+    filtered to that bucket. A bucket whose priced cost sums to <= 0 has no
+    meaningful multiple and is dropped, as is one with no priced row.
     """
-    margin = df["market_value"].fillna(0.0) - df["inventory_value"]
-    return brand_composition(df.assign(_margin=margin), "_margin")
+    rows = []
+    for k, grp in df.groupby("brand_bucket", observed=True):
+        m = markup_ratio(grp)
+        if m is None:
+            continue
+        priced = grp[priced_mask(grp)]
+        rows.append({
+            "label": str(k), "value": m, "color": brand_color(k),
+            "tip": f"{fmt_abbr(priced['wholesale_value'].sum())} wholesale ÷ "
+                   f"{fmt_abbr(priced['inventory_value'].sum())} cost",
+        })
+    rows.sort(key=lambda r: r["value"], reverse=True)
+    return rows
 
 
 # Columns whose footer total is a plain sum. Ratio columns are absent by design.
 _SUMMABLE = ("quantity_cases", "inventory_value", "wholesale_value",
-             "total_potential_profit", "dn_listing_count")
+             "total_potential_profit")
 
 
 def table_totals(df: pd.DataFrame) -> dict:
@@ -451,55 +554,65 @@ def table_totals(df: pd.DataFrame) -> dict:
     ``margin_pct`` is recomputed from the summed additive columns
     (Σprofit / Σwholesale) rather than averaged across rows — averaging per-SKU
     margins would weight a 1-case SKU the same as a 1,000-case one.
+    ``markup_multiple`` is ``markup_ratio`` (wholesale basis), the same figure
+    as the brand Markup bars and the KPI chip.
+
+    Sums go through ``_sum_or_none``, the same helper as ``stat_cards``, so a
+    slice with no priced SKU reads "—" in the footer as it does on the tiles,
+    rather than "$0" beside a "—".
     """
-    totals = {c: float(df[c].sum()) for c in _SUMMABLE if c in df.columns}
-    ws = totals.get("wholesale_value", 0.0)
-    totals["margin_pct"] = (totals.get("total_potential_profit", 0.0) / ws) if ws else None
+    totals = {c: _sum_or_none(df[c]) for c in _SUMMABLE if c in df.columns}
+    ws = totals.get("wholesale_value")
+    profit = totals.get("total_potential_profit")
+    totals["margin_pct"] = (profit / ws) if ws and profit is not None else None
+    totals["markup_multiple"] = markup_ratio(df)
     totals["_rows"] = int(len(df))
     return totals
 
 
-def nonpositive_qty_count(df: pd.DataFrame) -> int:
-    """SKUs carrying no positive on-hand quantity.
-
-    The query keeps every ``-CSE`` / ``-DB`` row regardless of quantity, so these
-    are expected, not corrupt. Surfaced in the UI so zero and negative rows are
-    not read as a bug.
-    """
-    return int((df["quantity_cases"] <= 0).sum())
-
-
 # ── export ────────────────────────────────────────────────────────────────────
-# Display order and headers mirror the on-screen table, so an exported file reads
-# like a screenshot of it.
+# The on-screen table's 15 columns first, in its order and under its headers (plus
+# the box and pack counts right after Qty, so a fractional case figure can be
+# traced), then the fields the table no longer shows (the detail panel's), so the
+# export stays the full raw set.
 _EXPORT_COLS = [
     ("product_name", "Product Name (Oracle)"),
-    ("dealernet_name", "Dealernet Name"),
     ("box_type", "Box Type"),
     ("item_number", "Item Number"),
-    ("brand_bucket", "Brand Bucket"),
-    ("quantity_cases", "Qty (Cases)"),
+    ("brand_bucket", "Brand"),
     ("street_date", "Street Date"),
     ("aging_bucket", "Aging Bucket"),
-    ("brand", "Brand"),
-    ("brand_oracle", "Brand (Oracle raw)"),
+    ("quantity_cases", "Qty (Cases)"),
+    # The physical -DB / -PCK holding behind a fractional Qty (Cases).
+    ("display_boxes", "Display Boxes"),
+    ("loose_packs", "Loose Packs"),
     ("inventory_value", "Inventory Value"),
+    ("unit_cost_per_case", "Unit Cost / Case"),
+    ("adj_dn_price_per_case", "Adj. DN Price / Case"),
+    ("wholesale_value", "Wholesale Value"),
+    ("total_potential_profit", "Potential Profit"),
+    ("margin_dollars_per_case", "Margin $ / Case"),
+    ("margin_pct", "Margin %"),
+    ("markup_multiple", "Markup Multiple"),
+    ("brand", "Licensor"),
+    ("brand_oracle", "Licensor (Oracle raw)"),
+    ("dealernet_name", "Dealernet Name"),
     ("boxes_per_case", "Boxes / Case"),
     ("packs_per_box", "Packs / Box"),
     ("cards_per_pack", "Cards / Pack"),
-    ("unit_cost_per_case", "Unit Cost / Case"),
-    ("dealernet_price_per_case", "DN Price / Case"),
-    ("market_value", "Market Value"),
-    ("wholesale_value", "Wholesale Value"),
-    ("margin_pct", "Margin %"),
-    ("total_potential_profit", "Potential Profit"),
-    ("margin_dollars_per_case", "Margin $ / Case"),
-    ("markup_multiple", "Markup Multiple"),
+    ("dealernet_price_per_case", "DN Price / Case (full)"),
+    ("market_value", "Market Value (gross DN)"),
+    ("price_status", "Price Status"),
     ("price_source", "Price Source"),
     ("dn_listing_count", "DN Listings"),
     ("dn_latest_date", "DN Latest"),
     ("year_match_type", "Year Match Type"),
 ]
+
+# Coerced on the SOURCE key, before the rename, so relabelling a header can never
+# silently skip the date / category conversion.
+_EXPORT_DATES = ("street_date", "dn_latest_date")
+_EXPORT_CATEGORIES = ("aging_bucket",)
 
 
 def export_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -509,13 +622,17 @@ def export_frame(df: pd.DataFrame) -> pd.DataFrame:
     recipient can pivot and sum it, which formatted strings would prevent.
     """
     cols = [(c, h) for c, h in _EXPORT_COLS if c in df.columns]
+    headers = [h for _, h in cols]
+    # A duplicate header makes out["X"] return a frame and the sheet ambiguous.
+    assert len(set(headers)) == len(headers), headers
     out = df[[c for c, _ in cols]].copy()
-    out.columns = [h for _, h in cols]
-    for c in ("Street Date", "DN Latest"):
+    for c in _EXPORT_DATES:
         if c in out.columns:
             out[c] = pd.to_datetime(out[c], errors="coerce").dt.date
-    if "Aging Bucket" in out.columns:
-        out["Aging Bucket"] = out["Aging Bucket"].astype(str)
+    for c in _EXPORT_CATEGORIES:
+        if c in out.columns:
+            out[c] = out[c].astype(str)
+    out.columns = headers
     return out
 
 

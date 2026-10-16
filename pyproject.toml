@@ -4,9 +4,12 @@ version = "0.1.0"
 description = "Vault Inventory / Dealernet dashboard — Streamlit recreation of vault_inventory_dashboard.html over the Oracle vault inventory view joined to Dealernet case prices."
 requires-python = ">=3.11"
 dependencies = [
-    # >=1.57 for st.components.v2 (interactive.py) — above the SiS warehouse
-    # runtime's ~1.52 ceiling, which is why this app targets the container runtime.
-    "streamlit>=1.57",
+    # >=1.63, the tested version: the header's horizontal container, st.space,
+    # st.html(width=) and st.expander(type=, key=) were verified there, and
+    # st.components.v2 (interactive.py) needs >=1.57. All are above the SiS
+    # warehouse runtime's ~1.52 ceiling, which is why this app targets the
+    # container runtime.
+    "streamlit>=1.63",
     "snowflake-snowpark-python",
     # Explicit: streamlit[snowflake] gates the connector on python_version < "3.12",
     # so on 3.12+ it is silently skipped and `import snowflake` fails.
