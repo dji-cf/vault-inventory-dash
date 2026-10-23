@@ -29,7 +29,14 @@ import interactive
 import style
 import transforms as tx
 
-st.set_page_config(page_title="Vault Inventory Dashboard", page_icon="◆", layout="wide")
+# Go-live: set DRAFT_LABEL = "" - every DRAFT string below derives from it.
+DRAFT_LABEL = "(DRAFT)"
+_DRAFT_WORD = DRAFT_LABEL.strip("()")
+_TAB_PREFIX = f"{_DRAFT_WORD} — " if DRAFT_LABEL else ""
+_TITLE_PREFIX = f"{DRAFT_LABEL} " if DRAFT_LABEL else ""
+_FILE_PREFIX = f"{_DRAFT_WORD}_" if DRAFT_LABEL else ""
+
+st.set_page_config(page_title=f"{_TAB_PREFIX}Vault Inventory Dashboard", page_icon="◆", layout="wide")
 style.inject_css()
 
 df_all, pulled_at = data.load_inventory()
@@ -121,7 +128,7 @@ view_label = (f"{tx.fmtq(len(flt))} of {tx.fmtq(len(df_all))} SKUs"
               if any_filter else "All Products")
 
 # ── chrome: header, KPI cards, context echo ──────────────────────────────────
-style.render(style.header_html(meta, pulled_at), container=hdr_slot)
+style.render(style.header_html(meta, pulled_at, title_prefix=_TITLE_PREFIX), container=hdr_slot)
 style.render(style.stat_cards_html(cards), container=kpi_slot)
 style.render(style.context_bar_html(mapping_code, view_label, any_filter),
              container=ctx_slot)
@@ -228,9 +235,9 @@ s2.segmented_control("Direction", [_DESC, _ASC], key="sort_dir",
 s3.selectbox("Rows per view", ROWS_OPTS, key="rows", label_visibility="collapsed",
              help="Rows shown before the table scrolls")
 
-payload, ext, mime = tx.to_excel(tx.export_frame(flt))
+payload, ext, mime = tx.to_excel(tx.export_frame(flt), sheet_name=f"{_FILE_PREFIX}inventory")
 s4.download_button(f"⬇ Export {ext.upper()}", payload, key="export",
-                   file_name=f"vault_inventory_{pulled_at:%Y%m%d}.{ext}",
+                   file_name=f"{_FILE_PREFIX}vault_inventory_{pulled_at:%Y%m%d}.{ext}",
                    mime=mime, width="stretch",
                    help="The filtered rows, with raw values rather than formatted text")
 

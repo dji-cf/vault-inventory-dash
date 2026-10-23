@@ -508,7 +508,7 @@ def export_frame(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def to_excel(df: pd.DataFrame) -> tuple[bytes, str, str]:
+def to_excel(df: pd.DataFrame, sheet_name: str = "inventory") -> tuple[bytes, str, str]:
     """``(payload, filename_suffix, mime)`` for a download button.
 
     Degrades to CSV when openpyxl is unavailable (it is pinned in
@@ -519,7 +519,7 @@ def to_excel(df: pd.DataFrame) -> tuple[bytes, str, str]:
     buf = io.BytesIO()
     try:
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            df.to_excel(w, index=False, sheet_name="inventory")
+            df.to_excel(w, index=False, sheet_name=sheet_name)
     except Exception:
         return (df.to_csv(index=False).encode("utf-8"), "csv", "text/csv")
     return (

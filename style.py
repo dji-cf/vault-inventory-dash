@@ -728,7 +728,8 @@ def freshness_label(pulled_at: datetime, now: datetime | None = None) -> tuple[s
 # ══════════════════════════════════════════════════════════════════════════════
 # CHROME BUILDERS
 # ══════════════════════════════════════════════════════════════════════════════
-def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
+def header_html(meta: dict, pulled_at: datetime | None = None,
+                title_prefix: str = "") -> str:
     """Header card: identity, freshness, and the three headline facts.
 
     The template shows "AS OF <month>", but ``VAULT_INVENTORY_V`` is an SCD2 view
@@ -747,7 +748,7 @@ def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
         '<div class="hdr">'
         '<div class="header-row header-row-top">'
         '<div class="hdr-title-group">'
-        '<div class="logo">Vault Inventory / Dealernet</div>'
+        f'<div class="logo">{escape(title_prefix)}Vault Inventory / Dealernet</div>'
         '<div class="dataset-selector-wrap">'
         '<label class="dataset-label">As Of</label>'
         '<span class="dataset-value" title="VAULT_INVENTORY_V is an SCD2 view with no '
