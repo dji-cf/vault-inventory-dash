@@ -44,6 +44,7 @@ if df_all.empty:
     st.error("The inventory query returned no rows. Check warehouse access and the "
              "VAULT_INV.VAULT_INVENTORY_V grant, then hit Refresh.")
     st.stop()
+df_all, hidden_empty = tx.drop_empty_skus(df_all)
 
 ss = st.session_state
 
@@ -259,6 +260,8 @@ clicked, sort_click = interactive.table(
     nonce=f"{sort_col}:{sort_asc}:{len(view)}",
     max_height=_cap_px(ss["rows"]),
 )
+if hidden_empty:
+    st.caption(f"{hidden_empty} SKUs with 0 quantity and $0 cost are hidden.")
 
 # A header click re-sorts; clicking the ACTIVE column flips direction, matching
 # the template's sortBy(). A fresh column starts ascending for text and
