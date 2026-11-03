@@ -39,14 +39,25 @@ _FILE_PREFIX = f"{_DRAFT_WORD}_" if DRAFT_LABEL else ""
 st.set_page_config(page_title=f"{_TAB_PREFIX}Vault Inventory Dashboard", page_icon="◆", layout="wide")
 style.inject_css()
 
-df_all, pulled_at = data.load_inventory()
+ss = st.session_state
+
+# ── As-of snapshot ───────────────────────────────────────────────────────────
+# "Live" (None) is the default and the original behaviour; any other option is a
+# month-end that pins the SCD2 version open on that day. Resolved BEFORE the
+# load because it chooses which snapshot to pull.
+_LIVE = "Live"
+ASOF_OPTS = [_LIVE] + data.load_snapshot_dates()
+ss.setdefault("as_of", _LIVE)
+if ss["as_of"] not in ASOF_OPTS:
+    ss["as_of"] = _LIVE
+as_of = None if ss["as_of"] == _LIVE else ss["as_of"]
+
+df_all, pulled_at = data.load_inventory(as_of)
 if df_all.empty:
     st.error("The inventory query returned no rows. Check warehouse access and the "
              "VAULT_INV.VAULT_INVENTORY_V grant, then hit Refresh.")
     st.stop()
 df_all, hidden_empty = tx.drop_empty_skus(df_all)
-
-ss = st.session_state
 
 # ── session state ────────────────────────────────────────────────────────────
 # Public widget keys are plain names; `_{key}_last` shadows a segmented control's
@@ -129,7 +140,8 @@ view_label = (f"{tx.fmtq(len(flt))} of {tx.fmtq(len(df_all))} SKUs"
               if any_filter else "All Products")
 
 # ── chrome: header, KPI cards, context echo ──────────────────────────────────
-style.render(style.header_html(meta, pulled_at, title_prefix=_TITLE_PREFIX), container=hdr_slot)
+style.render(style.header_html(meta, pulled_at, title_prefix=_TITLE_PREFIX, as_of=as_of),
+             container=hdr_slot)
 style.render(style.stat_cards_html(cards), container=kpi_slot)
 style.render(style.context_bar_html(mapping_code, view_label, any_filter),
              container=ctx_slot)
@@ -139,7 +151,7 @@ style.render(style.context_bar_html(mapping_code, view_label, any_filter),
 # given run disappears from the page, so filtering down to zero rows must not take
 # the filter bar with it — there would be nothing left to click to get back.
 with map_slot:
-    m1, m2, m3, m4 = st.columns([0.55, 2.0, 2.2, 0.9])
+    m1, m2, m3, m5, m4 = st.columns([0.55, 2.0, 2.2, 1.1, 0.9])
     style.render(style.mapping_label_html(), container=m1)
     with m2:
         st.segmented_control(
@@ -148,6 +160,11 @@ with map_slot:
             help="Mapped = a Dealernet case price was found for the SKU",
         )
     style.render(style.mapping_counts_html(meta), container=m3)
+    m5.selectbox(
+        "As of", ASOF_OPTS, key="as_of", label_visibility="collapsed",
+        format_func=lambda v: v if v == _LIVE else f"As of {v:%b} {v.day}, {v:%Y}",
+        help="Live = current open record; a month-end shows the inventory as it stood that day",
+    )
     with m4:
         if st.button("↻ Refresh", key="refresh", width="stretch",
                      help="Clear cached data and re-query Snowflake"):
@@ -237,8 +254,9 @@ s3.selectbox("Rows per view", ROWS_OPTS, key="rows", label_visibility="collapsed
              help="Rows shown before the table scrolls")
 
 payload, ext, mime = tx.to_excel(tx.export_frame(flt), sheet_name=f"{_FILE_PREFIX}inventory")
+_file_stamp = f"asof{as_of:%Y%m%d}" if as_of else f"{pulled_at:%Y%m%d}"
 s4.download_button(f"⬇ Export {ext.upper()}", payload, key="export",
-                   file_name=f"{_FILE_PREFIX}vault_inventory_{pulled_at:%Y%m%d}.{ext}",
+                   file_name=f"{_FILE_PREFIX}vault_inventory_{_file_stamp}.{ext}",
                    mime=mime, width="stretch",
                    help="The filtered rows, with raw values rather than formatted text")
 

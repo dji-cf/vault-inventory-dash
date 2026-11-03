@@ -16,7 +16,7 @@ SNOWFLAKE_HOST; we detect those and connect as the app's owner role.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
@@ -157,8 +157,16 @@ _TEXT_COLS = (
 )
 
 
+@st.cache_data(ttl=_TTL, show_spinner=False)
+def load_snapshot_dates() -> list[date]:
+    """Month-ends offered by the As-of picker, newest first (read-only, cached)."""
+    df = _connection().query(queries.SNAPSHOT_DATES_SQL, ttl=_TTL)
+    col = df.columns[0]
+    return [pd.Timestamp(v).date() for v in df[col].dropna()]
+
+
 @st.cache_data(ttl=_TTL, show_spinner="Loading vault inventory…")
-def load_inventory() -> tuple[pd.DataFrame, datetime]:
+def load_inventory(as_of: date | None = None) -> tuple[pd.DataFrame, datetime]:
     """The full SKU-grain snapshot, one row per ``item_key``.
 
     Returns ``(df, pulled_at)``. ``pulled_at`` is the UTC instant the SELECT
@@ -167,10 +175,10 @@ def load_inventory() -> tuple[pd.DataFrame, datetime]:
     a render clock. ``st.cache_data.clear()`` (the ↻ Refresh button) forces a new
     pull and therefore a new stamp.
 
-    There is no as-of argument: ``queries.INVENTORY_SQL`` pins the open SCD2
-    record, so this is always the live snapshot.
+    ``as_of=None`` is Live (the open SCD2 record); a month-end date pins the
+    version open on that day. Each value caches separately.
     """
-    df = _connection().query(queries.INVENTORY_SQL, ttl=_TTL)
+    df = _connection().query(queries.inventory_sql(as_of), ttl=_TTL)
     pulled_at = datetime.now(timezone.utc)
 
     df.columns = [c.lower() for c in df.columns]

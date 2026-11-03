@@ -23,9 +23,9 @@ Shape notes that the rest of the app depends on:
 * One row per ``item_key`` — ``ITEM_NUMBER`` stripped of its ``-CSE`` / ``-DB``
   suffix — so the case and the display box of a product collapse into one SKU.
 * ``ORACLE_DATA_PROD.VAULT_INV.VAULT_INVENTORY_V`` is an SCD2 view;
-  ``END_DATE = '4712-12-31'`` pins the currently-open record. There is NO as-of
-  dimension, so this is a live snapshot and the app has no period selector —
-  the header shows a DATA PULLED freshness stamp instead of an AS OF month.
+  ``END_DATE = '4712-12-31'`` pins the currently-open record (Live, default).
+  It also keeps 18 monthly versions, so ``inventory_sql(as_of)`` can pin the
+  version open on a chosen month-end instead — see the rule above it.
 * ``-CSE`` / ``-DB`` rows are kept regardless of on-hand quantity, while plain
   item numbers need a positive quantity. That is deliberate (it matches Sigma),
   and it is why ~36 SKUs carry a zero or negative ``quantity_cases``. The charts
@@ -44,8 +44,11 @@ Shape notes that the rest of the app depends on:
 """
 from __future__ import annotations
 
-# No bind parameters: the query takes no inputs. Anything user-supplied is
-# applied downstream in pandas (transforms.apply_filters), never spliced in here.
+from datetime import date
+
+# No bind parameters. The only input is the As-of date, which inventory_sql()
+# accepts solely as a ``datetime.date``; everything else user-supplied is
+# applied downstream in pandas (transforms.apply_filters).
 INVENTORY_SQL = """
 WITH brand_mapping AS (
     SELECT brand_oracle, brand_new
@@ -173,7 +176,7 @@ vault AS (
         SUM(INVENTORY_VALUE)                                            AS inventory_value
     FROM ORACLE_DATA_PROD.VAULT_INV.VAULT_INVENTORY_V
     WHERE ITEM_NUMBER IS NOT NULL
-      AND END_DATE = '4712-12-31'
+      AND {snapshot_filter}
       AND (
           ITEM_NUMBER LIKE '%-CSE'
           OR ITEM_NUMBER LIKE '%-DB'
@@ -261,3 +264,36 @@ LEFT JOIN brand_mapping bm
 
 ORDER BY v.brand, v.street_date
 """
+
+# SCD2 rule, checked against the view on 2026-11-03: every closed version runs
+# START_DATE = 1st of month .. END_DATE = that month's last day (INCLUSIVE); the
+# open version carries END_DATE = '4712-12-31'. So a month-end is covered by the
+# version with START_DATE <= d AND END_DATE >= d (``>`` would miss it).
+_LIVE_FILTER = "END_DATE = '4712-12-31'"
+
+# Month-ends with a closed SCD2 version. The open version's month-end lies in
+# the future and is identical to Live, so it is not offered separately.
+SNAPSHOT_DATES_SQL = """
+SELECT DISTINCT LAST_DAY(START_DATE) AS as_of
+FROM ORACLE_DATA_PROD.VAULT_INV.VAULT_INVENTORY_V
+WHERE START_DATE IS NOT NULL
+  AND END_DATE <> '4712-12-31'
+ORDER BY as_of DESC
+"""
+
+
+def inventory_sql(as_of: date | None = None) -> str:
+    """``INVENTORY_SQL`` pinned to Live (None) or to the version open on ``as_of``.
+
+    ``as_of`` must be a real ``datetime.date``; it is rendered via isoformat(),
+    so no free text can reach the statement. (Bind params are avoided because
+    the pyformat paramstyle would choke on the ``LIKE '%-CSE'`` patterns.)
+    """
+    if as_of is None:
+        flt = _LIVE_FILTER
+    else:
+        if not isinstance(as_of, date):
+            raise TypeError(f"as_of must be a date, got {type(as_of).__name__}")
+        d = date(as_of.year, as_of.month, as_of.day).isoformat()
+        flt = f"START_DATE <= '{d}' AND END_DATE >= '{d}'"
+    return INVENTORY_SQL.replace("{snapshot_filter}", flt)
