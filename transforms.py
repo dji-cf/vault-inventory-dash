@@ -469,6 +469,18 @@ def nonpositive_qty_count(df: pd.DataFrame) -> int:
     return int((df["quantity_cases"] <= 0).sum())
 
 
+def drop_empty_skus(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Hide SKUs with 0 on-hand quantity AND $0 inventory cost.
+
+    The query keeps every ``-CSE`` / ``-DB`` row regardless of quantity, which
+    leaves fully empty SKUs (e.g. FGC007132-CSE) in the table. Dropped here, in
+    the app, so the Snowflake query stays unchanged. Returns the kept frame and
+    the number of rows hidden.
+    """
+    empty = (df["quantity_cases"].fillna(0) == 0) & (df["inventory_value"].fillna(0) == 0)
+    return df.loc[~empty].reset_index(drop=True), int(empty.sum())
+
+
 # ── export ────────────────────────────────────────────────────────────────────
 # Display order and headers mirror the on-screen table, so an exported file reads
 # like a screenshot of it.
@@ -519,7 +531,7 @@ def export_frame(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def to_excel(df: pd.DataFrame) -> tuple[bytes, str, str]:
+def to_excel(df: pd.DataFrame, sheet_name: str = "inventory") -> tuple[bytes, str, str]:
     """``(payload, filename_suffix, mime)`` for a download button.
 
     Degrades to CSV when openpyxl is unavailable (it is pinned in
@@ -530,7 +542,7 @@ def to_excel(df: pd.DataFrame) -> tuple[bytes, str, str]:
     buf = io.BytesIO()
     try:
         with pd.ExcelWriter(buf, engine="openpyxl") as w:
-            df.to_excel(w, index=False, sheet_name="inventory")
+            df.to_excel(w, index=False, sheet_name=sheet_name)
     except Exception:
         return (df.to_csv(index=False).encode("utf-8"), "csv", "text/csv")
     return (

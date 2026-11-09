@@ -24,7 +24,7 @@ Reproducing those in Altair would approximate the design instead of porting it.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from html import escape
 
 import pandas as pd
@@ -728,14 +728,20 @@ def freshness_label(pulled_at: datetime, now: datetime | None = None) -> tuple[s
 # ══════════════════════════════════════════════════════════════════════════════
 # CHROME BUILDERS
 # ══════════════════════════════════════════════════════════════════════════════
-def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
+def header_html(meta: dict, pulled_at: datetime | None = None,
+                title_prefix: str = "", as_of: date | None = None) -> str:
     """Header card: identity, freshness, and the three headline facts.
 
-    The template shows "AS OF <month>", but ``VAULT_INVENTORY_V`` is an SCD2 view
-    with no as-of dimension and the query pins the open record — there is no
-    period to name. So the field reads Live Snapshot and is paired with a real
-    Data Pulled stamp, which is the question a reader actually has.
+    The As Of field reads "Live" for the open SCD2 record (default) or the
+    chosen month-end, e.g. "As of Sep 30, 2026". It is paired with a real Data
+    Pulled stamp, which says when the query ran, not which period it shows.
     """
+    if as_of is None:
+        asof_txt = "Live"
+        asof_tip = "Currently-open SCD2 record of VAULT_INVENTORY_V."
+    else:
+        asof_txt = f"{as_of:%b} {as_of.day}, {as_of:%Y}"
+        asof_tip = f"SCD2 version open on {as_of.isoformat()} (month-end snapshot)."
     fresh = ""
     if pulled_at is not None:
         rel, abs_txt = freshness_label(pulled_at)
@@ -747,11 +753,10 @@ def header_html(meta: dict, pulled_at: datetime | None = None) -> str:
         '<div class="hdr">'
         '<div class="header-row header-row-top">'
         '<div class="hdr-title-group">'
-        '<div class="logo">Vault Inventory / Dealernet</div>'
+        f'<div class="logo">{escape(title_prefix)}Vault Inventory / Dealernet</div>'
         '<div class="dataset-selector-wrap">'
         '<label class="dataset-label">As Of</label>'
-        '<span class="dataset-value" title="VAULT_INVENTORY_V is an SCD2 view with no '
-        'as-of dimension; the query pins the currently-open record.">Live Snapshot</span>'
+        f'<span class="dataset-value" title="{escape(asof_tip)}">{escape(asof_txt)}</span>'
         f'{fresh}'
         "</div></div>"
         '<div class="hdr-meta">'
